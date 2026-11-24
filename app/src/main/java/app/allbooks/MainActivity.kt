@@ -42,11 +42,38 @@ import app.allbooks.net.NetSettings
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Feed
 import app.allbooks.opds.OpdsParser
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 
-private const val START_URL = "https://www.gutenberg.org/ebooks/search.opds/"
+private data class Catalog(val name: String, val note: String, val urls: List<String>)
+
+private val CATALOGS = listOf(
+    Catalog(
+        "Project Gutenberg",
+        "Публічне надбання, понад 70 000 книг",
+        listOf(
+            "https://www.gutenberg.org/ebooks/search.opds/",
+            "https://m.gutenberg.org/ebooks.opds/"
+        )
+    ),
+    Catalog(
+        "Feedbooks",
+        "Публічне надбання та оригінальні книги",
+        listOf("https://catalog.feedbooks.com/catalog/index.atom")
+    ),
+    Catalog(
+        "Internet Archive",
+        "Open Library, велика цифрова бібліотека",
+        listOf("https://bookserver.archive.org/catalog/")
+    ),
+    Catalog(
+        "Flibusta",
+        "Російськомовна та українська бібліотека (http)",
+        listOf("http://flibusta.is/opds")
+    )
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,48 +92,49 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen() {
-    val history = remember { mutableStateListOf(START_URL) }
-    val url = history.last()
+    val history = remember { mutableStateListOf<List<String>>() }
+    val current = history.lastOrNull()
     var feed by remember { mutableStateOf<Feed?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(url, reloadKey) {
+    LaunchedEffect(current, reloadKey) {
+        val urls = current ?: return@LaunchedEffect
         loading = true
         error = null
+        feed = null
         try {
             feed = withContext(Dispatchers.IO) {
                 val client = Net.buildClient(NetSettings())
-                val r = Net.fetchFirst(client, listOf(url))
+                val r = Net.fetchFirst(client, urls)
                 OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = e.message ?: e.javaClass.simpleName
         }
         loading = false
     }
 
-    BackHandler(enabled = history.size > 1) {
+    BackHandler(enabled = history.isNotEmpty()) {
         history.removeAt(history.lastIndex)
     }
+
+    val title = if (current == null) "All Books" else (feed?.title ?: "Завантаження…")
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        feed?.title ?: "All Books",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             )
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             val f = feed
             when {
+                current == null -> HomeList { c -> history.add(c.urls) }
                 loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 error != null -> Column(
                     Modifier.align(Alignment.Center).padding(24.dp),
@@ -118,18 +146,36 @@ fun CatalogScreen() {
                 }
                 f != null -> LazyColumn(Modifier.fillMaxSize()) {
                     items(f.entries) { e ->
-                        EntryRow(e) { target -> history.add(target) }
+                        EntryRow(e) { target -> history.add(listOf(target)) }
                     }
                     f.nextUrl?.let { next ->
                         item {
                             TextButton(
-                                onClick = { history.add(next) },
+                                onClick = { history.add(listOf(next)) },
                                 modifier = Modifier.padding(8.dp)
                             ) { Text("Далі →") }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeList(onOpen: (Catalog) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(CATALOGS) { c ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpen(c) }
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                Text(c.name, style = MaterialTheme.typography.titleMedium)
+                Text(c.note, style = MaterialTheme.typography.bodySmall)
+            }
+            HorizontalDivider()
         }
     }
 }
