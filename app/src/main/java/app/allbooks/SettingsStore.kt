@@ -29,7 +29,8 @@ object SettingsStore {
             startCatalog = p.getString("start_catalog", "") ?: "",
             downloadFolder = p.getString("download_folder", "BookMriya") ?: "BookMriya",
             folderChosen = p.getBoolean("folder_chosen", false),
-            safFolderUri = p.getString("saf_folder_uri", "") ?: ""
+            safFolderUri = p.getString("saf_folder_uri", "") ?: "",
+            theme = p.getString("theme", "system") ?: "system"
         )
     }
 
@@ -45,6 +46,7 @@ object SettingsStore {
             .putString("download_folder", s.downloadFolder)
             .putBoolean("folder_chosen", s.folderChosen)
             .putString("saf_folder_uri", s.safFolderUri)
+            .putString("theme", s.theme)
             .apply()
     }
 }
