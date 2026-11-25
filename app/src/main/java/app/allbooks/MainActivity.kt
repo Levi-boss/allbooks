@@ -101,6 +101,8 @@ import app.allbooks.opds.OpdsParser
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
@@ -212,6 +214,14 @@ private fun searchUrlFor(template: String, term: String): String {
     return template.replace("{searchTerms}", enc).replace("%7BsearchTerms%7D", enc)
 }
 
+/** Одна секція результатів глобального пошуку: каталог і його книги. */
+private data class GlobalSection(
+    val catalog: Catalog,
+    val template: String?,
+    val entries: List<Entry>,
+    val error: String? = null
+)
+
 /** Шукає адресу сторінки з книгами автора: пов'язане посилання, uri автора або пошук. */
 private fun authorTarget(a: Author, e: Entry, searchTemplate: String?): String? {
     val nameLc = a.name.lowercase()
@@ -292,6 +302,12 @@ fun CatalogScreen() {
     var reloadKey by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
     var searchExpanded by remember { mutableStateOf(false) }
+    var globalQuery by remember { mutableStateOf("") }
+    var globalSearching by remember { mutableStateOf(false) }
+    var globalSections by remember { mutableStateOf<List<GlobalSection>>(emptyList()) }
+    var globalDone by remember { mutableStateOf(false) }
+    var globalBookCatalog by remember { mutableStateOf<Catalog?>(null) }
+    var globalBookTemplate by remember { mutableStateOf<String?>(null) }
     val searchFocus = remember { FocusRequester() }
     var custom by remember { mutableStateOf(CustomStore.load(context)) }
     var catalogAuth by remember { mutableStateOf(AuthStore.load(context)) }
@@ -456,6 +472,8 @@ fun CatalogScreen() {
     }
     BackHandler(enabled = selected != null) {
         selected = null
+        globalBookCatalog = null
+        globalBookTemplate = null
     }
 
     if (showAdd || editingCatalog != null) {
@@ -554,6 +572,63 @@ fun CatalogScreen() {
     val subs = remember(subsVersion) { SubscriptionsStore.load(context) }
     val isSubscribed = { url: String -> subs.any { it.url == url } }
 
+    // Логін/пароль довільного каталогу: свої поля у власного,
+    // інакше збережені окремо в AuthStore (для вбудованих).
+    fun credsFor(cat: Catalog): Pair<String?, String?> {
+        val u = cat.user.takeIf { it.isNotBlank() } ?: catalogAuth[cat.name]?.first
+        val p = if (cat.user.isNotBlank()) cat.pass else catalogAuth[cat.name]?.second
+        return u to p
+    }
+
+    // Глобальний пошук: питаємо всі каталоги паралельно. У кожного свій
+    // шаблон пошуку (беремо з кореневої стрічки каталогу), тому спочатку
+    // вантажимо корінь, потім — пошук за шаблоном.
+    fun submitGlobalSearch() {
+        val q = globalQuery.trim()
+        if (q.isEmpty() || globalSearching) return
+        globalSearching = true
+        globalDone = false
+        scope.launch {
+            val catalogs = CATALOGS + custom
+            val sections = withContext(Dispatchers.IO) {
+                coroutineScope {
+                    catalogs.map { cat ->
+                        async {
+                            try {
+                                val client = Net.buildClient(settings)
+                                val (u, p) = credsFor(cat)
+                                val root = Net.fetchFirst(client, cat.urls, u, p)
+                                val rootFeed = OpdsParser.parse(
+                                    ByteArrayInputStream(root.bytes), root.url
+                                )
+                                val template = rootFeed.searchUrl ?: return@async null
+                                val sr = Net.fetchFirst(
+                                    client, listOf(searchUrlFor(template, q)), u, p
+                                )
+                                val sfeed = OpdsParser.parse(
+                                    ByteArrayInputStream(sr.bytes), sr.url
+                                )
+                                GlobalSection(cat, template, sfeed.entries)
+                            } catch (e: Exception) {
+                                AppLog.d("Global search failed for ${cat.name}: ${e.message}")
+                                GlobalSection(cat, null, emptyList(), e.message)
+                            }
+                        }
+                    }.awaitAll().filterNotNull()
+                }
+            }
+            globalSections = sections
+            globalSearching = false
+            globalDone = true
+        }
+    }
+
+    // Для сторінки книги: якщо її відкрито з глобального пошуку —
+    // шаблон пошуку і логін/пароль її каталогу, інакше — поточної стрічки.
+    val detailTemplate = globalBookTemplate ?: feed?.searchUrl
+    val detailUser = globalBookCatalog?.let { credsFor(it).first } ?: credUser
+    val detailPass = globalBookCatalog?.let { credsFor(it).second } ?: credPass
+
     // Додому: список каталогів, як у старої програми.
     fun goHome() {
         history.clear()
@@ -562,11 +637,16 @@ fun CatalogScreen() {
         newIds = emptySet()
         query = ""
         searchExpanded = false
+        globalQuery = ""
+        globalSections = emptyList()
+        globalDone = false
+        globalBookCatalog = null
+        globalBookTemplate = null
     }
 
     // Підписка: зберігаємо поточний список книг як базу, щоб новими
     // вважалися лише книги, що з'являться після підписки.
-    fun toggleSubscription(type: String, name: String, url: String) {
+    fun toggleSubscription(type: String, name: String, url: String, user: String?, pass: String?) {
         if (isSubscribed(url)) {
             SubscriptionsStore.save(context, subs.filterNot { it.url == url })
             subsVersion++
@@ -577,7 +657,7 @@ fun CatalogScreen() {
             val baseline = try {
                 withContext(Dispatchers.IO) {
                     val client = Net.buildClient(settings)
-                    val r = Net.fetchFirst(client, listOf(url), credUser, credPass)
+                    val r = Net.fetchFirst(client, listOf(url), user, pass)
                     OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url).entries.map { it.id }.toSet()
                 }
             } catch (e: Exception) {
@@ -589,8 +669,8 @@ fun CatalogScreen() {
                     type = type, name = name, url = url,
                     knownIds = baseline, newIds = emptySet(),
                     lastCheck = System.currentTimeMillis(),
-                    user = credUser ?: "",
-                    pass = credPass ?: ""
+                    user = user ?: "",
+                    pass = pass ?: ""
                 )
             )
             subsVersion++
@@ -679,7 +759,7 @@ fun CatalogScreen() {
                     s = s,
                     e = sel,
                     onAuthor = { a ->
-                        val target = authorTarget(a, sel, f?.searchUrl)
+                        val target = authorTarget(a, sel, detailTemplate)
                         if (target != null) {
                             selected = null
                             history.add(listOf(target))
@@ -705,37 +785,111 @@ fun CatalogScreen() {
                         }
                     },
                     onToggleAuthor = { a ->
-                        val target = authorTarget(a, sel, f?.searchUrl)
+                        val target = authorTarget(a, sel, detailTemplate)
                         if (target != null) {
-                            toggleSubscription("author", a.name, target)
+                            toggleSubscription("author", a.name, target, detailUser, detailPass)
                         } else {
                             Toast.makeText(context, s.authorUnavailable, Toast.LENGTH_SHORT).show()
                         }
                     },
                     isAuthorSubscribed = { a ->
-                        val target = authorTarget(a, sel, f?.searchUrl)
+                        val target = authorTarget(a, sel, detailTemplate)
                         target != null && isSubscribed(target)
                     },
                     onToggleSeries = {
                         val link = sel.seriesLink
                         if (link != null) {
-                            toggleSubscription("series", sel.seriesName ?: sel.title, link.href)
+                            toggleSubscription("series", sel.seriesName ?: sel.title, link.href, detailUser, detailPass)
                         }
                     },
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
-                    onDownload = { link -> Downloads.start(context, sel, link, s, credUser, credPass, settings.downloadFolder, settings, settings.safFolderUri) }
+                    onDownload = { link -> Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri) }
                 )
-                current == null -> HomeList(
-                    s = s,
-                    lang = lang,
-                    custom = custom,
-                    onOpen = { c -> currentCatalog = c; history.add(c.urls) },
-                    onDelete = { c ->
-                        custom = custom - c
-                        CustomStore.save(context, custom)
-                    },
-                    onEdit = { c -> editingCatalog = c }
-                )
+                current == null -> Column(Modifier.fillMaxSize()) {
+                    OutlinedTextField(
+                        value = globalQuery,
+                        onValueChange = {
+                            globalQuery = it
+                            if (it.isBlank()) {
+                                globalSections = emptyList()
+                                globalDone = false
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        singleLine = true,
+                        placeholder = { Text(s.searchAll) },
+                        trailingIcon = {
+                            IconButton(onClick = { submitGlobalSearch() }) {
+                                Icon(Icons.Filled.Search, contentDescription = s.search)
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { submitGlobalSearch() })
+                    )
+                    if (globalSearching) {
+                        Box(
+                            Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    } else if (globalSections.isNotEmpty() || globalDone) {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            if (globalSections.all { it.entries.isEmpty() }) {
+                                item {
+                                    Text(
+                                        s.noSearchResults,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+                            }
+                            globalSections.forEach { section ->
+                                if (section.entries.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            section.catalog.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(
+                                                16.dp, 12.dp, 16.dp, 4.dp
+                                            )
+                                        )
+                                    }
+                                    items(section.entries) { e ->
+                                        EntryRow(
+                                            s = s,
+                                            e = e,
+                                            isNew = false,
+                                            onBook = {
+                                                selected = e
+                                                globalBookCatalog = section.catalog
+                                                globalBookTemplate = section.template
+                                            },
+                                            onOpen = { target ->
+                                                currentCatalog = section.catalog
+                                                history.add(listOf(target))
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        HomeList(
+                            s = s,
+                            lang = lang,
+                            custom = custom,
+                            onOpen = { c -> currentCatalog = c; history.add(c.urls) },
+                            onDelete = { c ->
+                                custom = custom - c
+                                CustomStore.save(context, custom)
+                            },
+                            onEdit = { c -> editingCatalog = c }
+                        )
+                    }
+                }
                 loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 error != null -> Column(
                     Modifier.align(Alignment.Center).padding(24.dp),
