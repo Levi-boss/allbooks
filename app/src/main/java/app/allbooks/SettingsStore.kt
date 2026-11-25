@@ -28,7 +28,8 @@ object SettingsStore {
             useDoh = p.getBoolean("use_doh", false),
             startCatalog = p.getString("start_catalog", "") ?: "",
             downloadFolder = p.getString("download_folder", "BookMriya") ?: "BookMriya",
-            folderChosen = p.getBoolean("folder_chosen", false)
+            folderChosen = p.getBoolean("folder_chosen", false),
+            safFolderUri = p.getString("saf_folder_uri", "") ?: ""
         )
     }
 
@@ -43,6 +44,7 @@ object SettingsStore {
             .putString("start_catalog", s.startCatalog)
             .putString("download_folder", s.downloadFolder)
             .putBoolean("folder_chosen", s.folderChosen)
+            .putString("saf_folder_uri", s.safFolderUri)
             .apply()
     }
 }
