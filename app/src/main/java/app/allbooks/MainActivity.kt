@@ -299,6 +299,7 @@ fun CatalogScreen() {
     var showSettings by remember { mutableStateOf(false) }
     var showDownloads by remember { mutableStateOf(false) }
     var showMyBooks by remember { mutableStateOf(false) }
+    var readingBook by remember { mutableStateOf<ReaderBook?>(null) }
     var showSubscriptions by remember { mutableStateOf(false) }
     var subsVersion by remember { mutableIntStateOf(0) }
     var newIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -483,7 +484,21 @@ fun CatalogScreen() {
         return
     }
     if (showMyBooks) {
-        MyBooksScreen(s = s, settings = settings, onBack = { showMyBooks = false })
+        MyBooksScreen(
+            s = s,
+            settings = settings,
+            onBack = { showMyBooks = false },
+            onRead = { readingBook = ReaderBook.fromMyBook(it) }
+        )
+        return
+    }
+    if (readingBook != null) {
+        ReaderScreen(
+            s = s,
+            book = readingBook!!,
+            dark = themeIsDark(settings.theme),
+            onBack = { readingBook = null }
+        )
         return
     }
     BackHandler(enabled = selected != null) {
@@ -783,7 +798,9 @@ fun CatalogScreen() {
         Box(Modifier.fillMaxSize().padding(padding)) {
             val f = feed
             when {
-                sel != null -> BookDetail(
+                sel != null -> {
+                val readBook = remember(sel) { Reader.findDownloaded(context, settings, s, sel) }
+                BookDetail(
                     s = s,
                     e = sel,
                     onAuthor = { a ->
@@ -831,8 +848,10 @@ fun CatalogScreen() {
                         }
                     },
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
-                    onDownload = { link -> Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri) }
+                    onDownload = { link -> Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri) },
+                    onRead = readBook?.let { rb -> { readingBook = rb } }
                 )
+            }
                 current == null -> Column(Modifier.fillMaxSize()) {
                     OutlinedTextField(
                         value = globalQuery,
@@ -1022,7 +1041,8 @@ private fun BookDetail(
     isAuthorSubscribed: (Author) -> Boolean,
     onToggleSeries: () -> Unit,
     isSeriesSubscribed: Boolean,
-    onDownload: (Link) -> Unit
+    onDownload: (Link) -> Unit,
+    onRead: (() -> Unit)? = null
 ) {
     val cover = e.links.firstOrNull { it.rel == "http://opds-spec.org/image" }?.href
         ?: e.links.firstOrNull {
@@ -1115,6 +1135,11 @@ private fun BookDetail(
                     FormatChip(l.format) { onDownload(l) }
                 }
             }
+        }
+
+        if (onRead != null) {
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onRead) { Text(s.read) }
         }
 
         val seriesLink = e.seriesLink
