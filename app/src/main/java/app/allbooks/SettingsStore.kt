@@ -27,7 +27,8 @@ object SettingsStore {
             proxyPass = p.getString("proxy_pass", "") ?: "",
             useDoh = p.getBoolean("use_doh", false),
             startCatalog = p.getString("start_catalog", "") ?: "",
-            downloadFolder = p.getString("download_folder", "BookMriya") ?: "BookMriya"
+            downloadFolder = p.getString("download_folder", "BookMriya") ?: "BookMriya",
+            folderChosen = p.getBoolean("folder_chosen", false)
         )
     }
 
@@ -41,6 +42,7 @@ object SettingsStore {
             .putBoolean("use_doh", s.useDoh)
             .putString("start_catalog", s.startCatalog)
             .putString("download_folder", s.downloadFolder)
+            .putBoolean("folder_chosen", s.folderChosen)
             .apply()
     }
 }
