@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.Net
+import app.allbooks.net.NetSettings
 import app.allbooks.opds.OpdsParser
 import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
