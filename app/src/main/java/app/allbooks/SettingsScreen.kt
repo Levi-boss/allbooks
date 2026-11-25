@@ -64,7 +64,8 @@ fun SettingsScreen(
                 proxyPass = pass,
                 useDoh = useDoh,
                 startCatalog = startCatalog,
-                downloadFolder = folder.trim().ifEmpty { "BookMriya" }
+                downloadFolder = folder.trim().ifEmpty { "BookMriya" },
+                folderChosen = true
             )
         )
     }
