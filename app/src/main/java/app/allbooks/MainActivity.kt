@@ -277,6 +277,7 @@ fun CatalogScreen() {
     val s = AppLanguages.stringsFor(lang)
     var showSettings by remember { mutableStateOf(false) }
     var showDownloads by remember { mutableStateOf(false) }
+    var showMyBooks by remember { mutableStateOf(false) }
     var showSubscriptions by remember { mutableStateOf(false) }
     var subsVersion by remember { mutableIntStateOf(0) }
     var newIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -417,6 +418,7 @@ fun CatalogScreen() {
     }
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showDownloads) { showDownloads = false }
+    BackHandler(enabled = showMyBooks) { showMyBooks = false }
     BackHandler(enabled = showSubscriptions) { showSubscriptions = false }
     if (showSubscriptions) {
         SubscriptionsScreen(
@@ -446,6 +448,10 @@ fun CatalogScreen() {
     }
     if (showDownloads) {
         DownloadsScreen(s = s, onBack = { showDownloads = false })
+        return
+    }
+    if (showMyBooks) {
+        MyBooksScreen(s = s, settings = settings, onBack = { showMyBooks = false })
         return
     }
     BackHandler(enabled = selected != null) {
@@ -631,6 +637,10 @@ fun CatalogScreen() {
                             DropdownMenuItem(
                                 text = { Text(s.downloads) },
                                 onClick = { showMenu = false; showDownloads = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(s.myBooks) },
+                                onClick = { showMenu = false; showMyBooks = true }
                             )
                             DropdownMenuItem(
                                 text = { Text(s.subscriptions) },
