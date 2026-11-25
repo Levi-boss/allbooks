@@ -14,6 +14,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -30,6 +32,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -37,9 +40,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
@@ -69,6 +75,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
@@ -81,6 +88,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -1037,6 +1045,17 @@ private fun AuthDialog(
     )
 }
 
+/** Адреса фавіконки каталогу (для логотипа в картці); null — показати монограму. */
+private fun faviconUrl(c: Catalog): String? {
+    val first = c.urls.firstOrNull() ?: return null
+    return try {
+        val u = java.net.URL(first)
+        "${u.protocol}://${u.host}/favicon.ico"
+    } catch (e: Exception) {
+        null
+    }
+}
+
 @Composable
 private fun HomeList(
     s: AppStrings,
@@ -1046,7 +1065,32 @@ private fun HomeList(
     onDelete: (Catalog) -> Unit,
     onEdit: (Catalog) -> Unit
 ) {
-    LazyColumn(Modifier.fillMaxSize()) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 16.dp)
+    ) {
+        item {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 24.dp, bottom = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(96.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "BookMriya",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFE53935),
+                    letterSpacing = 2.sp
+                )
+            }
+        }
         items(CATALOGS) { c -> CatalogRow(s, c, lang, onOpen, null, null) }
         if (custom.isNotEmpty()) {
             item {
@@ -1071,33 +1115,80 @@ private fun CatalogRow(
     onDelete: (() -> Unit)?,
     onEdit: (() -> Unit)? = null
 ) {
-    Row(
-        Modifier
+    Card(
+        onClick = { onOpen(c) },
+        modifier = Modifier
             .fillMaxWidth()
-            .clickable { onOpen(c) }
-            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(c.name, style = MaterialTheme.typography.titleMedium)
-            Text(
-                c.noteFor(lang),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    c.name.take(1).uppercase(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                AsyncImage(
+                    model = faviconUrl(c),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        c.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (c.user.isNotBlank()) {
+                        Text("🔒", modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
+                Text(
+                    c.noteFor(lang),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (onEdit != null || onDelete != null) {
+                    Row {
+                        if (onEdit != null) {
+                            TextButton(onClick = onEdit) { Text(s.edit) }
+                        }
+                        if (onDelete != null) {
+                            TextButton(onClick = onDelete) { Text(s.delete) }
+                        }
+                    }
+                }
+            }
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (c.user.isNotBlank()) {
-            Text("🔒", modifier = Modifier.padding(end = 4.dp))
-        }
-        if (onEdit != null) {
-            TextButton(onClick = onEdit) { Text(s.edit) }
-        }
-        if (onDelete != null) {
-            TextButton(onClick = onDelete) { Text(s.delete) }
-        }
     }
-    HorizontalDivider()
 }
 
 /** Кольорова плашка формату, як у Library: FB2 — червона, HTML — синя і т.д. */
