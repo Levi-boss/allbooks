@@ -15,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -37,7 +38,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -45,6 +45,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -54,8 +55,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -72,6 +75,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.ImeAction
@@ -80,6 +84,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.allbooks.net.Net
 import app.allbooks.opds.Author
 import app.allbooks.opds.Entry
@@ -225,9 +230,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLog.d("BookMriya start")
+        ThemeChoice.set(SettingsStore.load(this).theme)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
+            val dark = themeIsDark(ThemeChoice.theme)
+            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CatalogScreen()
                 }
@@ -237,6 +244,23 @@ class MainActivity : ComponentActivity() {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+/** Вибір теми: "system" (як у телефоні), "light", "dark". */
+object ThemeChoice {
+    var theme by mutableStateOf("system")
+        private set
+
+    fun set(t: String) {
+        theme = t
+    }
+}
+
+@Composable
+private fun themeIsDark(theme: String): Boolean = when (theme) {
+    "light" -> false
+    "dark" -> true
+    else -> isSystemInDarkTheme()
+}
+
 @Composable
 fun CatalogScreen() {
     val context = LocalContext.current
@@ -341,6 +365,10 @@ fun CatalogScreen() {
 
     LaunchedEffect(searchExpanded) {
         if (searchExpanded) searchFocus.requestFocus()
+    }
+
+    LaunchedEffect(settings.theme) {
+        ThemeChoice.set(settings.theme)
     }
 
     LaunchedEffect(current, reloadKey) {
@@ -558,11 +586,28 @@ fun CatalogScreen() {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    Text(
+                        title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        color = Color(0xFFE53935),
+                        fontSize = 22.sp,
+                        letterSpacing = 2.sp
+                    )
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = if (themeIsDark(settings.theme)) Color(0xFF121212) else Color.White
+                ),
                 navigationIcon = {
                     Box {
                         IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Filled.Menu, contentDescription = s.menu)
+                            Icon(
+                                painter = painterResource(R.drawable.ic_gear_old),
+                                contentDescription = s.menu
+                            )
                         }
                         DropdownMenu(
                             expanded = showMenu,
