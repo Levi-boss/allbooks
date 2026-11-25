@@ -160,6 +160,34 @@ private object CustomStore {
     }
 }
 
+/** Логін/пароль для каталогів окремо від їх списку: вбудовані каталоги
+ *  теж можуть попросити авторизацію (401), а їх редагувати не можна. */
+private object AuthStore {
+    private const val PREFS = "allbooks"
+    private const val KEY = "catalog_auth"
+
+    fun load(c: Context): Map<String, Pair<String, String>> {
+        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
+        val map = mutableMapOf<String, Pair<String, String>>()
+        raw.lines().forEach { line ->
+            val parts = line.split('|')
+            if (parts.size >= 3 && parts[0].isNotBlank()) {
+                map[parts[0]] = parts[1] to parts[2]
+            }
+        }
+        return map
+    }
+
+    fun save(c: Context, map: Map<String, Pair<String, String>>) {
+        val raw = map.entries.joinToString("\n") { (name, up) ->
+            val clean = { s: String -> s.replace("|", " ").replace("\n", " ").trim() }
+            clean(name) + "|" + clean(up.first) + "|" + up.second.replace("|", " ").replace("\n", " ")
+        }
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY, raw).apply()
+    }
+}
+
 private fun searchUrlFor(template: String, term: String): String {
     val enc = URLEncoder.encode(term, "UTF-8")
     return template.replace("{searchTerms}", enc).replace("%7BsearchTerms%7D", enc)
@@ -224,11 +252,20 @@ fun CatalogScreen() {
     var reloadKey by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
     var custom by remember { mutableStateOf(CustomStore.load(context)) }
+    var catalogAuth by remember { mutableStateOf(AuthStore.load(context)) }
+    var showAuth by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Entry?>(null) }
     var startOpened by remember { mutableStateOf(false) }
     var folderSetupDismissed by remember { mutableStateOf(false) }
     var folderDraft by remember { mutableStateOf(settings.downloadFolder) }
+
+    // Логін/пароль для поточного каталогу: свої поля у власного каталогу,
+    // інакше збережені окремо в AuthStore (вбудовані теж можуть дати 401).
+    val credUser = currentCatalog?.user?.takeIf { it.isNotBlank() }
+        ?: currentCatalog?.name?.let { catalogAuth[it]?.first }
+    val credPass = if (currentCatalog?.user?.isNotBlank() == true) currentCatalog?.pass
+    else currentCatalog?.name?.let { catalogAuth[it]?.second }
 
     // Дозвіл на запис файлів (Android 12 і старіше; на 13+ його вже нема —
     // доступ дає вибір папки через файловий менеджер). Питаємо раз при запуску.
@@ -300,13 +337,14 @@ fun CatalogScreen() {
         try {
             feed = withContext(Dispatchers.IO) {
                 val client = Net.buildClient(settings)
-                val r = Net.fetchFirst(client, urls, currentCatalog?.user, currentCatalog?.pass)
+                val r = Net.fetchFirst(client, urls, credUser, credPass)
                 OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             error = if (e.message == "Немає жодної адреси") s.noAddress else e.message ?: e.javaClass.simpleName
+            if (e.message == "HTTP 401") showAuth = true
         }
         loading = false
     }
@@ -383,6 +421,30 @@ fun CatalogScreen() {
         )
     }
 
+    if (showAuth && currentCatalog != null) {
+        AuthDialog(
+            s = s,
+            catalogName = currentCatalog!!.name,
+            initialUser = credUser ?: "",
+            initialPass = credPass ?: "",
+            onDismiss = { showAuth = false },
+            onSave = { user, pass ->
+                val cat = currentCatalog!!
+                if (custom.any { it.name == cat.name && it.urls == cat.urls }) {
+                    val updated = cat.copy(user = user, pass = pass)
+                    custom = custom.map { if (it.name == cat.name && it.urls == cat.urls) updated else it }
+                    CustomStore.save(context, custom)
+                    currentCatalog = updated
+                } else {
+                    catalogAuth = catalogAuth + (cat.name to (user to pass))
+                    AuthStore.save(context, catalogAuth)
+                }
+                showAuth = false
+                reloadKey++
+            }
+        )
+    }
+
     // Перший запуск: якщо папку завантажень ще не вибирали — запитати одразу.
     if (!settings.folderChosen && !folderSetupDismissed) {
         AlertDialog(
@@ -439,7 +501,7 @@ fun CatalogScreen() {
             val baseline = try {
                 withContext(Dispatchers.IO) {
                     val client = Net.buildClient(settings)
-                    val r = Net.fetchFirst(client, listOf(url), currentCatalog?.user, currentCatalog?.pass)
+                    val r = Net.fetchFirst(client, listOf(url), credUser, credPass)
                     OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url).entries.map { it.id }.toSet()
                 }
             } catch (e: Exception) {
@@ -451,8 +513,8 @@ fun CatalogScreen() {
                     type = type, name = name, url = url,
                     knownIds = baseline, newIds = emptySet(),
                     lastCheck = System.currentTimeMillis(),
-                    user = currentCatalog?.user ?: "",
-                    pass = currentCatalog?.pass ?: ""
+                    user = credUser ?: "",
+                    pass = credPass ?: ""
                 )
             )
             subsVersion++
@@ -555,7 +617,7 @@ fun CatalogScreen() {
                         }
                     },
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
-                    onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder, settings, settings.safFolderUri) }
+                    onDownload = { link -> Downloads.start(context, sel, link, s, credUser, credPass, settings.downloadFolder, settings, settings.safFolderUri) }
                 )
                 current == null -> HomeList(
                     s = s,
@@ -576,6 +638,10 @@ fun CatalogScreen() {
                     Text("${s.errorTitle}: $error")
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = { reloadKey++ }) { Text(s.retry) }
+                    if (error?.startsWith("HTTP 401") == true && currentCatalog != null) {
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { showAuth = true }) { Text(s.enterLogin) }
+                    }
                 }
                 f != null -> Column(Modifier.fillMaxSize()) {
                     f.searchUrl?.let { template ->
@@ -603,7 +669,7 @@ fun CatalogScreen() {
                                 e = e,
                                 isNew = newIds.contains(e.id),
                                 onBook = { selected = e },
-                                onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder, settings, settings.safFolderUri) },
+                                onDownload = { link -> Downloads.start(context, e, link, s, credUser, credPass, settings.downloadFolder, settings, settings.safFolderUri) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
                         }
@@ -811,6 +877,50 @@ private fun CatalogDialog(
             }
         },
         confirmButton = { TextButton(onClick = { onSave(name, url, user, pass) }) { Text(if (initial == null) s.add else s.save) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } }
+    )
+}
+
+/** Діалог логіна/пароля, коли каталог повернув HTTP 401. */
+@Composable
+private fun AuthDialog(
+    s: AppStrings,
+    catalogName: String,
+    initialUser: String,
+    initialPass: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    var user by remember { mutableStateOf(initialUser) }
+    var pass by remember { mutableStateOf(initialPass) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(s.authRequiredTitle + ": " + catalogName) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    singleLine = true,
+                    label = { Text(s.loginOptional) }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = pass,
+                    onValueChange = { pass = it },
+                    singleLine = true,
+                    label = { Text(s.passwordOptional) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                Text(
+                    s.authNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(user.trim(), pass) }) { Text(s.save) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } }
     )
 }
