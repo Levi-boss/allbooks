@@ -344,7 +344,7 @@ fun CatalogScreen() {
             throw e
         } catch (e: Exception) {
             error = if (e.message == "Немає жодної адреси") s.noAddress else e.message ?: e.javaClass.simpleName
-            if (e.message == "HTTP 401") showAuth = true
+            if (e.message?.startsWith("HTTP 401") == true) showAuth = true
         }
         loading = false
     }
