@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,12 +40,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.Net
 import app.allbooks.net.NetSettings
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Feed
+import app.allbooks.opds.Link
 import app.allbooks.opds.OpdsParser
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
@@ -101,6 +105,7 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen() {
+    val context = LocalContext.current
     val history = remember { mutableStateListOf<List<String>>() }
     val current = history.lastOrNull()
     var feed by remember { mutableStateOf<Feed?>(null) }
@@ -155,7 +160,11 @@ fun CatalogScreen() {
                 }
                 f != null -> LazyColumn(Modifier.fillMaxSize()) {
                     items(f.entries) { e ->
-                        EntryRow(e) { target -> history.add(listOf(target)) }
+                        EntryRow(
+                            e,
+                            onDownload = { link -> Downloads.start(context, e, link) },
+                            onOpen = { target -> history.add(listOf(target)) }
+                        )
                     }
                     f.nextUrl?.let { next ->
                         item {
@@ -190,7 +199,7 @@ private fun HomeList(onOpen: (Catalog) -> Unit) {
 }
 
 @Composable
-fun EntryRow(e: Entry, onOpen: (String) -> Unit) {
+fun EntryRow(e: Entry, onDownload: (Link) -> Unit, onOpen: (String) -> Unit) {
     val nav = if (e.isBook) null else e.navigation
     val clickMod = if (nav != null) Modifier.clickable { onOpen(nav.href) } else Modifier
     val cover = e.links.firstOrNull {
@@ -230,8 +239,14 @@ fun EntryRow(e: Entry, onOpen: (String) -> Unit) {
                 )
             }
             if (e.isBook) {
-                val formats = e.links.filter { it.isAcquisition }.map { it.format }.distinct()
-                Text(formats.joinToString(" · "), style = MaterialTheme.typography.labelMedium)
+                val acquisitions = e.links.filter { it.isAcquisition }.distinctBy { it.format }
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    acquisitions.forEach { l ->
+                        TextButton(onClick = { onDownload(l) }) {
+                            Text("⬇ " + l.format.uppercase())
+                        }
+                    }
+                }
             }
         }
     }
