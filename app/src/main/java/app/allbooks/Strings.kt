@@ -102,7 +102,13 @@ data class AppStrings(
     val themeTitle: String,
     val themeSystem: String,
     val themeLight: String,
-    val themeDark: String
+    val themeDark: String,
+    val myBooks: String,
+    val myBooksEmpty: String,
+    val myBooksEmptyHint: String,
+    val deleteBookTitle: String,
+    val deleteBookText: String,
+    val mb: String
 )
 
 object AppLanguages {
@@ -223,7 +229,13 @@ object AppLanguages {
         themeTitle = "Theme",
         themeSystem = "System",
         themeLight = "Light",
-        themeDark = "Dark"
+        themeDark = "Dark",
+        myBooks = "My books",
+        myBooksEmpty = "No books in the folder yet.",
+        myBooksEmptyHint = "Download a book from a catalog — it will appear here.",
+        deleteBookTitle = "Delete this book?",
+        deleteBookText = "The file will be deleted from the folder.",
+        mb = "MB"
     )
 
     val uk = AppStrings(
@@ -321,7 +333,13 @@ object AppLanguages {
         themeTitle = "Тема",
         themeSystem = "Системна",
         themeLight = "Світла",
-        themeDark = "Темна"
+        themeDark = "Темна",
+        myBooks = "Мої книги",
+        myBooksEmpty = "У папці поки нема книг.",
+        myBooksEmptyHint = "Завантажте книгу з каталогу — вона з'явиться тут.",
+        deleteBookTitle = "Видалити цю книгу?",
+        deleteBookText = "Файл буде видалено з папки.",
+        mb = "МБ"
     )
 
     val ru = AppStrings(
@@ -419,6 +437,12 @@ object AppLanguages {
         themeTitle = "Тема",
         themeSystem = "Системная",
         themeLight = "Светлая",
-        themeDark = "Тёмная"
+        themeDark = "Тёмная",
+        myBooks = "Мои книги",
+        myBooksEmpty = "В папке пока нет книг.",
+        myBooksEmptyHint = "Скачайте книгу из каталога — она появится здесь.",
+        deleteBookTitle = "Удалить эту книгу?",
+        deleteBookText = "Файл будет удалён из папки.",
+        mb = "МБ"
     )
 }
