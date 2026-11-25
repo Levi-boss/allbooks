@@ -1,5 +1,8 @@
 package app.allbooks
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -53,21 +57,50 @@ fun SettingsScreen(
     var useDoh by remember { mutableStateOf(settings.useDoh) }
     var startCatalog by remember { mutableStateOf(settings.startCatalog) }
     var folder by remember { mutableStateOf(settings.downloadFolder) }
+    var safFolderUri by remember { mutableStateOf(settings.safFolderUri) }
+    val context = LocalContext.current
+
+    fun buildSettings(): NetSettings = NetSettings(
+        proxyMode = mode,
+        proxyHost = host.trim(),
+        proxyPort = port.trim().toIntOrNull() ?: 0,
+        proxyUser = user.trim(),
+        proxyPass = pass,
+        useDoh = useDoh,
+        startCatalog = startCatalog,
+        downloadFolder = folder.trim().ifEmpty { "BookMriya" },
+        folderChosen = true,
+        safFolderUri = safFolderUri
+    )
 
     fun save() {
-        onSettingsChange(
-            NetSettings(
-                proxyMode = mode,
-                proxyHost = host.trim(),
-                proxyPort = port.trim().toIntOrNull() ?: 0,
-                proxyUser = user.trim(),
-                proxyPass = pass,
-                useDoh = useDoh,
-                startCatalog = startCatalog,
-                downloadFolder = folder.trim().ifEmpty { "BookMriya" },
-                folderChosen = true
+        onSettingsChange(buildSettings())
+    }
+
+    // Вибір папки через файловий менеджер (SAF): система дає застосунку
+    // постійний доступ саме до вибраної папки, без дозволу на всю пам'ять.
+    val folderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                // дозвіл не зберігся — папка все одно спробує працювати
+            }
+            safFolderUri = uri.toString()
+            folder = Downloads.safDisplayName(uri.toString())
+            onSettingsChange(
+                buildSettings().copy(
+                    safFolderUri = uri.toString(),
+                    downloadFolder = Downloads.safDisplayName(uri.toString())
+                )
             )
-        )
+        }
     }
 
     Scaffold(
@@ -144,6 +177,19 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 8.dp)
             )
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = { folderPicker.launch(null) }) {
+                    Text(s.chooseFolder)
+                }
+                if (safFolderUri.isNotBlank()) {
+                    TextButton(onClick = {
+                        safFolderUri = ""
+                        folder = "BookMriya"
+                        onSettingsChange(buildSettings().copy(safFolderUri = "", downloadFolder = "BookMriya"))
+                    }) { Text(s.resetFolder) }
+                }
+            }
 
             Spacer(Modifier.height(24.dp))
             Text(s.proxy, style = MaterialTheme.typography.titleMedium)
