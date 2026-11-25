@@ -7,10 +7,15 @@ data class Feed(
     val searchUrl: String?
 )
 
+data class Author(
+    val name: String,
+    val uri: String
+)
+
 data class Entry(
     val id: String,
     val title: String,
-    val authors: List<String>,
+    val authors: List<Author>,
     val summary: String,
     val links: List<Link>
 ) {
