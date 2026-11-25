@@ -22,6 +22,24 @@ data class Entry(
     val isBook: Boolean get() = links.any { it.isAcquisition }
     val thumbnail: Link? get() = links.firstOrNull { it.isThumbnail }
     val navigation: Link? get() = links.firstOrNull { it.isNavigation }
+
+    /** Посилання «Всі книги серії» (Flibusta/CoolLib: /opds/sequencebooks/…). */
+    val seriesLink: Link? get() = links.firstOrNull {
+        it.type.contains("atom") &&
+            (it.href.contains("sequence") ||
+                it.title.contains("серии", ignoreCase = true) ||
+                it.title.contains("series", ignoreCase = true))
+    }
+    val seriesName: String? get() {
+        val t = seriesLink?.title ?: return null
+        val quoted = t.substringAfter('"', "").substringBefore('"', "")
+        if (quoted.isNotBlank()) return quoted
+        return t.substringAfter("серии", "").substringAfter("series", "")
+            .trim().trim('"', '«', '»').ifBlank { null }
+    }
+    /** Номер книги в серії, якщо є в описі («Серия: … #1»). */
+    val seriesNumber: String? get() =
+        Regex("Серия:[^\\n]*#(\\d+)").find(summary)?.groupValues?.getOrNull(1)
 }
 
 data class Link(
