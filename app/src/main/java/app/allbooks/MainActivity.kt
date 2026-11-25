@@ -50,6 +50,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +73,7 @@ import app.allbooks.opds.OpdsParser
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.net.URLEncoder
@@ -199,6 +201,9 @@ fun CatalogScreen() {
     val s = AppLanguages.stringsFor(lang)
     var showSettings by remember { mutableStateOf(false) }
     var showDownloads by remember { mutableStateOf(false) }
+    var showSubscriptions by remember { mutableStateOf(false) }
+    var subsVersion by remember { mutableIntStateOf(0) }
+    var newIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var editingCatalog by remember { mutableStateOf<Catalog?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var currentCatalog by remember { mutableStateOf<Catalog?>(null) }
@@ -250,10 +255,28 @@ fun CatalogScreen() {
 
     BackHandler(enabled = history.isNotEmpty()) {
         history.removeAt(history.lastIndex)
-        if (history.isEmpty()) currentCatalog = null
+        if (history.isEmpty()) {
+            currentCatalog = null
+            newIds = emptySet()
+        }
     }
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showDownloads) { showDownloads = false }
+    BackHandler(enabled = showSubscriptions) { showSubscriptions = false }
+    if (showSubscriptions) {
+        SubscriptionsScreen(
+            s = s,
+            settings = settings,
+            onBack = { showSubscriptions = false },
+            onOpen = { url, ids ->
+                showSubscriptions = false
+                selected = null
+                newIds = ids
+                history.add(listOf(url))
+            }
+        )
+        return
+    }
     if (showSettings) {
         SettingsScreen(
             s = s,
@@ -308,6 +331,44 @@ fun CatalogScreen() {
     }
 
     val sel = selected
+    val scope = rememberCoroutineScope()
+    val subs = remember(subsVersion) { SubscriptionsStore.load(context) }
+    val isSubscribed = { url: String -> subs.any { it.url == url } }
+
+    // Підписка: зберігаємо поточний список книг як базу, щоб новими
+    // вважалися лише книги, що з'являться після підписки.
+    fun toggleSubscription(type: String, name: String, url: String) {
+        if (isSubscribed(url)) {
+            SubscriptionsStore.save(context, subs.filterNot { it.url == url })
+            subsVersion++
+            Toast.makeText(context, s.unsubscribed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            val baseline = try {
+                withContext(Dispatchers.IO) {
+                    val client = Net.buildClient(settings)
+                    val r = Net.fetchFirst(client, listOf(url), currentCatalog?.user, currentCatalog?.pass)
+                    OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url).entries.map { it.id }.toSet()
+                }
+            } catch (e: Exception) {
+                emptySet()
+            }
+            SubscriptionsStore.save(
+                context,
+                SubscriptionsStore.load(context) + Subscription(
+                    type = type, name = name, url = url,
+                    knownIds = baseline, newIds = emptySet(),
+                    lastCheck = System.currentTimeMillis(),
+                    user = currentCatalog?.user ?: "",
+                    pass = currentCatalog?.pass ?: ""
+                )
+            )
+            subsVersion++
+            Toast.makeText(context, s.subscribed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val title = when {
         sel != null -> sel.title
         current == null -> s.appNameRunes
@@ -333,6 +394,10 @@ fun CatalogScreen() {
                             DropdownMenuItem(
                                 text = { Text(s.downloads) },
                                 onClick = { showMenu = false; showDownloads = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(s.subscriptions) },
+                                onClick = { showMenu = false; showSubscriptions = true }
                             )
                             DropdownMenuItem(
                                 text = { Text(s.settings) },
@@ -372,6 +437,25 @@ fun CatalogScreen() {
                         history.add(listOf(url))
                     },
                     onOpenSite = { url -> webUrl = url },
+                    onToggleAuthor = { a ->
+                        val target = authorTarget(a, sel, f?.searchUrl)
+                        if (target != null) {
+                            toggleSubscription("author", a.name, target)
+                        } else {
+                            Toast.makeText(context, s.authorUnavailable, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    isAuthorSubscribed = { a ->
+                        val target = authorTarget(a, sel, f?.searchUrl)
+                        target != null && isSubscribed(target)
+                    },
+                    onToggleSeries = {
+                        val link = sel.seriesLink
+                        if (link != null) {
+                            toggleSubscription("series", sel.seriesName ?: sel.title, link.href)
+                        }
+                    },
+                    isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
                     onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder) }
                 )
                 current == null -> HomeList(
@@ -416,7 +500,9 @@ fun CatalogScreen() {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(f.entries) { e ->
                             EntryRow(
-                                e,
+                                s = s,
+                                e = e,
+                                isNew = newIds.contains(e.id),
                                 onBook = { selected = e },
                                 onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder) },
                                 onOpen = { target -> history.add(listOf(target)) }
@@ -470,6 +556,10 @@ private fun BookDetail(
     onAuthor: (Author) -> Unit,
     onSeries: (String) -> Unit,
     onOpenSite: (String) -> Unit,
+    onToggleAuthor: (Author) -> Unit,
+    isAuthorSubscribed: (Author) -> Boolean,
+    onToggleSeries: () -> Unit,
+    isSeriesSubscribed: Boolean,
     onDownload: (Link) -> Unit
 ) {
     val cover = e.links.firstOrNull { it.rel == "http://opds-spec.org/image" }?.href
@@ -522,8 +612,13 @@ private fun BookDetail(
                 Text(e.title, style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(8.dp))
                 e.authors.forEach { a ->
-                    TextButton(onClick = { onAuthor(a) }) {
-                        Text(a.name, style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { onAuthor(a) }) {
+                            Text(a.name, style = MaterialTheme.typography.titleMedium)
+                        }
+                        TextButton(onClick = { onToggleAuthor(a) }) {
+                            Text(if (isAuthorSubscribed(a)) "✓" else "+")
+                        }
                     }
                 }
             }
@@ -567,12 +662,17 @@ private fun BookDetail(
         val seriesName = e.seriesName
         if (seriesLink != null && seriesName != null) {
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = { onSeries(seriesLink.href) }) {
-                Text(
-                    s.series + ": " + seriesName +
-                        (e.seriesNumber?.let { " #$it" } ?: ""),
-                    style = MaterialTheme.typography.titleMedium
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { onSeries(seriesLink.href) }) {
+                    Text(
+                        s.series + ": " + seriesName +
+                            (e.seriesNumber?.let { " #$it" } ?: ""),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                TextButton(onClick = onToggleSeries) {
+                    Text(if (isSeriesSubscribed) "✓" else "+")
+                }
             }
         }
 
@@ -709,7 +809,9 @@ private fun CatalogRow(
 
 @Composable
 fun EntryRow(
+    s: AppStrings,
     e: Entry,
+    isNew: Boolean = false,
     onBook: () -> Unit,
     onDownload: (Link) -> Unit,
     onOpen: (String) -> Unit
@@ -740,7 +842,21 @@ fun EntryRow(
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(e.title, style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    e.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (isNew) {
+                    Text(
+                        s.newBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            }
             if (e.authors.isNotEmpty()) {
                 Text(
                     e.authors.joinToString(", ") { it.name },
