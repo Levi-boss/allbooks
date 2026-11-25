@@ -96,7 +96,8 @@ data class AppStrings(
     val fileNotReady: String,
     val openBook: String,
     val openFailed: String,
-    val noAddress: String
+    val noAddress: String,
+    val shareLogs: String
 )
 
 object AppLanguages {
@@ -211,7 +212,8 @@ object AppLanguages {
         fileNotReady = "File is not ready yet",
         openBook = "Open book",
         openFailed = "Failed to open",
-        noAddress = "No address available"
+        noAddress = "No address available",
+        shareLogs = "Share logs"
     )
 
     val uk = AppStrings(
@@ -303,7 +305,8 @@ object AppLanguages {
         fileNotReady = "Файл ще не готовий",
         openBook = "Відкрити книгу",
         openFailed = "Не вдалося відкрити",
-        noAddress = "Немає жодної адреси"
+        noAddress = "Немає жодної адреси",
+        shareLogs = "Поділитися логами"
     )
 
     val ru = AppStrings(
@@ -395,6 +398,7 @@ object AppLanguages {
         fileNotReady = "Файл ещё не готов",
         openBook = "Открыть книгу",
         openFailed = "Не удалось открыть",
-        noAddress = "Нет ни одного адреса"
+        noAddress = "Нет ни одного адреса",
+        shareLogs = "Поделиться логами"
     )
 }
