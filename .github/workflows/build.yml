@@ -22,16 +22,20 @@ jobs:
 
       - name: Prepare signing key
         env:
-          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_B64_RAW: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS_RAW: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
+          KS_B64=$(printf %s "$KS_B64_RAW" | tr -d ' \r\n\t')
+          KS_PASS=$(printf %s "$KS_PASS_RAW" | tr -d ' \r\n\t')
+          echo "::notice::Довжина KEYSTORE_BASE64=${#KS_B64} (має бути 3516); довжина пароля=${#KS_PASS} (має бути 20)"
+          echo "::notice::Відбиток KEYSTORE_BASE64=$(printf %s "$KS_B64" | sha256sum | cut -c1-12) (має бути 3b0f27a506ab)"
           if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then
-            echo "::error::Секрети KEYSTORE_BASE64 або KEYSTORE_PASSWORD порожні"
+            echo "::error::Один із секретів порожній"
             exit 1
           fi
-          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/allbooks.keystore"
+          printf %s "$KS_B64" | base64 -d > "$RUNNER_TEMP/allbooks.keystore"
           keytool -list -keystore "$RUNNER_TEMP/allbooks.keystore" -storepass "$KS_PASS" > /dev/null 2>&1 || {
-            echo "::error::Файл ключа або пароль невірні (перевір секрети)"
+            echo "::error::Файл ключа або пароль невірні, дивись довжини вище"
             exit 1
           }
           echo "KEYSTORE_FILE=$RUNNER_TEMP/allbooks.keystore" >> "$GITHUB_ENV"
