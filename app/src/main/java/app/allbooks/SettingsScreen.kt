@@ -40,6 +40,7 @@ fun SettingsScreen(
     s: AppStrings,
     settings: NetSettings,
     language: String,
+    catalogs: List<String>,
     onLanguageChange: (String) -> Unit,
     onSettingsChange: (NetSettings) -> Unit,
     onBack: () -> Unit
@@ -50,6 +51,8 @@ fun SettingsScreen(
     var user by remember { mutableStateOf(settings.proxyUser) }
     var pass by remember { mutableStateOf(settings.proxyPass) }
     var useDoh by remember { mutableStateOf(settings.useDoh) }
+    var startCatalog by remember { mutableStateOf(settings.startCatalog) }
+    var folder by remember { mutableStateOf(settings.downloadFolder) }
 
     fun save() {
         onSettingsChange(
@@ -59,7 +62,9 @@ fun SettingsScreen(
                 proxyPort = port.trim().toIntOrNull() ?: 0,
                 proxyUser = user.trim(),
                 proxyPass = pass,
-                useDoh = useDoh
+                useDoh = useDoh,
+                startCatalog = startCatalog,
+                downloadFolder = folder.trim().ifEmpty { "BookMriya" }
             )
         )
     }
@@ -104,6 +109,39 @@ fun SettingsScreen(
                 s.languageNote,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp)
+            )
+
+            Spacer(Modifier.height(24.dp))
+            Text(s.startPage, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            for ((value, label) in listOf("" to s.startPageHome) + catalogs.map { it to it }) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { startCatalog = value }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = startCatalog == value, onClick = { startCatalog = value })
+                    Text(label, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Text(s.downloadFolder, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = folder,
+                onValueChange = { folder = it },
+                singleLine = true,
+                label = { Text(s.downloadFolder) },
+                placeholder = { Text("BookMriya") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                s.downloadFolderHint,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp)
             )
 
             Spacer(Modifier.height(24.dp))
