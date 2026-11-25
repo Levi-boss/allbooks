@@ -217,6 +217,7 @@ private fun authorTarget(a: Author, e: Entry, searchTemplate: String?): String? 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.d("BookMriya start")
         enableEdgeToEdge()
         setContent {
             MaterialTheme {
@@ -344,6 +345,7 @@ fun CatalogScreen() {
             throw e
         } catch (e: Exception) {
             error = if (e.message == "Немає жодної адреси") s.noAddress else e.message ?: e.javaClass.simpleName
+            AppLog.d("Feed error: ${e.message}")
             if (e.message?.startsWith("HTTP 401") == true) showAuth = true
         }
         loading = false
@@ -439,6 +441,7 @@ fun CatalogScreen() {
                     catalogAuth = catalogAuth + (cat.name to (user to pass))
                     AuthStore.save(context, catalogAuth)
                 }
+                AppLog.d("Auth saved for ${cat.name}")
                 showAuth = false
                 reloadKey++
             }
