@@ -25,14 +25,23 @@ jobs:
           KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/allbooks.keystore"
-            echo "KEYSTORE_FILE=$RUNNER_TEMP/allbooks.keystore" >> "$GITHUB_ENV"
-            echo "KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then
+            echo "Секрети KEYSTORE_BASE64 або KEYSTORE_PASSWORD порожні"
+            exit 1
           fi
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/allbooks.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/allbooks.keystore" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
 
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
+
+      - name: Verify signature
+        run: |
+          AS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
+          OUT=$("$AS" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
+          echo "$OUT"
+          echo "$OUT" | grep -q "fd849d9ddaafc62d989dd63d286504e93acbe69b3558b4af4b7d7fe7985757be" || { echo "НЕПРАВИЛЬНИЙ КЛЮЧ ПІДПИСУ"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
