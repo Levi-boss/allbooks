@@ -2,6 +2,8 @@ package app.allbooks
 
 import android.content.Context
 import android.os.Bundle
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -54,6 +56,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -208,6 +212,22 @@ fun CatalogScreen() {
     var custom by remember { mutableStateOf(CustomStore.load(context)) }
     var showAdd by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Entry?>(null) }
+    var webUrl by remember { mutableStateOf<String?>(null) }
+    var startOpened by remember { mutableStateOf(false) }
+
+    // Стартова сторінка: відкрити вибраний каталог одразу при запуску.
+    LaunchedEffect(settings.startCatalog) {
+        if (!startOpened && history.isEmpty()) {
+            startOpened = true
+            val name = settings.startCatalog
+            if (name.isNotBlank()) {
+                (CATALOGS + custom).firstOrNull { it.name == name }?.let { c ->
+                    currentCatalog = c
+                    history.add(c.urls)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(current, reloadKey) {
         val urls = current ?: return@LaunchedEffect
@@ -239,6 +259,7 @@ fun CatalogScreen() {
             s = s,
             settings = settings,
             language = languagePref,
+            catalogs = (CATALOGS + custom).map { it.name },
             onLanguageChange = { languagePref = it; LanguageStore.save(context, it) },
             onSettingsChange = { settings = it; SettingsStore.save(context, it) },
             onBack = { showSettings = false }
@@ -247,6 +268,11 @@ fun CatalogScreen() {
     }
     if (showDownloads) {
         DownloadsScreen(s = s, onBack = { showDownloads = false })
+        return
+    }
+    BackHandler(enabled = webUrl != null) { webUrl = null }
+    if (webUrl != null) {
+        WebViewScreen(s = s, url = webUrl!!, onBack = { webUrl = null })
         return
     }
     BackHandler(enabled = selected != null) {
@@ -345,7 +371,8 @@ fun CatalogScreen() {
                         selected = null
                         history.add(listOf(url))
                     },
-                    onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass) }
+                    onOpenSite = { url -> webUrl = url },
+                    onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder) }
                 )
                 current == null -> HomeList(
                     s = s,
@@ -391,7 +418,7 @@ fun CatalogScreen() {
                             EntryRow(
                                 e,
                                 onBook = { selected = e },
-                                onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass) },
+                                onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
                         }
@@ -410,12 +437,39 @@ fun CatalogScreen() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WebViewScreen(s: AppStrings, url: String, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text(url, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = {
+                    TextButton(onClick = onBack) { Text(s.back) }
+                }
+            )
+        }
+    ) { padding ->
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    webViewClient = WebViewClient()
+                    settings.javaScriptEnabled = true
+                    loadUrl(url)
+                }
+            },
+            modifier = Modifier.fillMaxSize().padding(padding)
+        )
+    }
+}
+
 @Composable
 private fun BookDetail(
     s: AppStrings,
     e: Entry,
     onAuthor: (Author) -> Unit,
     onSeries: (String) -> Unit,
+    onOpenSite: (String) -> Unit,
     onDownload: (Link) -> Unit
 ) {
     val cover = e.links.firstOrNull { it.rel == "http://opds-spec.org/image" }?.href
@@ -427,6 +481,23 @@ private fun BookDetail(
     val summaryText = e.summary.lines()
         .filterNot { it.trim().startsWith("Серия:", ignoreCase = true) }
         .joinToString("\n").trim()
+    var showCover by remember { mutableStateOf(false) }
+    val siteUrl = e.links.firstOrNull {
+        it.rel == "alternate" && it.type.contains("html")
+    }?.href
+
+    if (showCover && cover != null) {
+        Dialog(onDismissRequest = { showCover = false }) {
+            AsyncImage(
+                model = cover,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { showCover = false }
+            )
+        }
+    }
 
     Column(
         Modifier
@@ -440,7 +511,10 @@ private fun BookDetail(
                     model = cover,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.width(130.dp).heightIn(max = 200.dp)
+                    modifier = Modifier
+                        .width(130.dp)
+                        .heightIn(max = 200.dp)
+                        .clickable { showCover = true }
                 )
                 Spacer(Modifier.width(16.dp))
             }
@@ -452,6 +526,28 @@ private fun BookDetail(
                         Text(a.name, style = MaterialTheme.typography.titleMedium)
                     }
                 }
+            }
+        }
+
+        if (e.categories.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                s.genre + ": " + e.categories.joinToString(", "),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        val metaLine = listOfNotNull(
+            e.language.takeIf { it.isNotBlank() }?.let { s.language + ": " + it },
+            e.year?.let { s.year + ": " + it }
+        ).joinToString("  •  ")
+        if (metaLine.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(metaLine, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (siteUrl != null) {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { onOpenSite(siteUrl) }) {
+                Text(s.openOnSite, style = MaterialTheme.typography.titleMedium)
             }
         }
 
