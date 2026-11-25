@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +35,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,16 +66,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.Net
@@ -252,6 +259,8 @@ fun CatalogScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
+    var searchExpanded by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
     var custom by remember { mutableStateOf(CustomStore.load(context)) }
     var catalogAuth by remember { mutableStateOf(AuthStore.load(context)) }
     var showAuth by remember { mutableStateOf(false) }
@@ -330,7 +339,12 @@ fun CatalogScreen() {
         }
     }
 
+    LaunchedEffect(searchExpanded) {
+        if (searchExpanded) searchFocus.requestFocus()
+    }
+
     LaunchedEffect(current, reloadKey) {
+        searchExpanded = false
         val urls = current ?: return@LaunchedEffect
         loading = true
         error = null
@@ -491,6 +505,16 @@ fun CatalogScreen() {
     val subs = remember(subsVersion) { SubscriptionsStore.load(context) }
     val isSubscribed = { url: String -> subs.any { it.url == url } }
 
+    // Додому: список каталогів, як у старої програми.
+    fun goHome() {
+        history.clear()
+        currentCatalog = null
+        selected = null
+        newIds = emptySet()
+        query = ""
+        searchExpanded = false
+    }
+
     // Підписка: зберігаємо поточний список книг як базу, щоб новими
     // вважалися лише книги, що з'являться після підписки.
     fun toggleSubscription(type: String, name: String, url: String) {
@@ -535,13 +559,10 @@ fun CatalogScreen() {
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                actions = {
-                    if (current == null && sel == null) {
+                navigationIcon = {
+                    Box {
                         IconButton(onClick = { showMenu = true }) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_gear_old),
-                                contentDescription = s.menu
-                            )
+                            Icon(Icons.Filled.Menu, contentDescription = s.menu)
                         }
                         DropdownMenu(
                             expanded = showMenu,
@@ -563,6 +584,18 @@ fun CatalogScreen() {
                                 text = { Text(s.addCatalog) },
                                 onClick = { showMenu = false; showAdd = true }
                             )
+                        }
+                    }
+                },
+                actions = {
+                    if (current != null || sel != null) {
+                        IconButton(onClick = { goHome() }) {
+                            Icon(Icons.Filled.Home, contentDescription = s.home)
+                        }
+                    }
+                    if (sel == null && feed?.searchUrl != null) {
+                        IconButton(onClick = { searchExpanded = !searchExpanded }) {
+                            Icon(Icons.Filled.Search, contentDescription = s.search)
                         }
                     }
                 }
@@ -647,23 +680,47 @@ fun CatalogScreen() {
                     }
                 }
                 f != null -> Column(Modifier.fillMaxSize()) {
-                    f.searchUrl?.let { template ->
-                        OutlinedTextField(
-                            value = query,
-                            onValueChange = { query = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            singleLine = true,
-                            placeholder = { Text(s.search) },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                val q = query.trim()
-                                if (q.isNotEmpty()) {
-                                    history.add(listOf(searchUrlFor(template, q)))
-                                }
-                            })
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        f.icon?.let { iconUrl ->
+                            AsyncImage(
+                                model = iconUrl,
+                                contentDescription = null,
+                                modifier = Modifier.size(56.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Text(
+                            f.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center
                         )
+                    }
+                    if (searchExpanded) {
+                        f.searchUrl?.let { template ->
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .focusRequester(searchFocus),
+                                singleLine = true,
+                                placeholder = { Text(s.search) },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = {
+                                    val q = query.trim()
+                                    if (q.isNotEmpty()) {
+                                        history.add(listOf(searchUrlFor(template, q)))
+                                    }
+                                })
+                            )
+                        }
                     }
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(f.entries) { e ->
@@ -672,7 +729,6 @@ fun CatalogScreen() {
                                 e = e,
                                 isNew = newIds.contains(e.id),
                                 onBook = { selected = e },
-                                onDownload = { link -> Downloads.start(context, e, link, s, credUser, credPass, settings.downloadFolder, settings, settings.safFolderUri) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
                         }
@@ -1019,14 +1075,12 @@ private fun FormatChip(format: String, onClick: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EntryRow(
     s: AppStrings,
     e: Entry,
     isNew: Boolean = false,
     onBook: () -> Unit,
-    onDownload: (Link) -> Unit,
     onOpen: (String) -> Unit
 ) {
     val nav = if (e.isBook) null else e.navigation
@@ -1077,21 +1131,13 @@ fun EntryRow(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-            if (e.summary.isNotBlank()) {
+            if (!e.isBook && e.summary.isNotBlank()) {
                 Text(
                     e.summary,
-                    maxLines = 3,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall
                 )
-            }
-            if (e.isBook) {
-                val acquisitions = e.links.filter { it.isAcquisition }.distinctBy { it.format }
-                FlowRow {
-                    acquisitions.forEach { l ->
-                        FormatChip(l.format) { onDownload(l) }
-                    }
-                }
             }
         }
     }
