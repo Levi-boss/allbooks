@@ -27,15 +27,14 @@ data class DownloadItem(
         get() = status == DownloadManager.STATUS_PENDING ||
             status == DownloadManager.STATUS_RUNNING ||
             status == DownloadManager.STATUS_PAUSED
-    val statusText: String
-        get() = when (status) {
-            DownloadManager.STATUS_PENDING -> "Очікування"
-            DownloadManager.STATUS_RUNNING -> "Завантаження"
-            DownloadManager.STATUS_PAUSED -> "Призупинено"
-            DownloadManager.STATUS_SUCCESSFUL -> "Завантажено"
-            DownloadManager.STATUS_FAILED -> "Помилка завантаження"
-            else -> "Невідомий статус"
-        }
+    fun statusText(s: AppStrings): String = when (status) {
+        DownloadManager.STATUS_PENDING -> s.statusPending
+        DownloadManager.STATUS_RUNNING -> s.statusRunning
+        DownloadManager.STATUS_PAUSED -> s.statusPaused
+        DownloadManager.STATUS_SUCCESSFUL -> s.statusSuccessful
+        DownloadManager.STATUS_FAILED -> s.statusFailed
+        else -> s.statusUnknown
+    }
 }
 
 object Downloads {
@@ -57,7 +56,7 @@ object Downloads {
         return if (t.contains("fb2") && t.contains("zip")) "fb2.zip" else link.format
     }
 
-    fun start(context: Context, entry: Entry, link: Link, user: String? = null, pass: String? = null) {
+    fun start(context: Context, entry: Entry, link: Link, s: AppStrings, user: String? = null, pass: String? = null) {
         val safe = entry.title
             .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
             .trim()
@@ -81,13 +80,13 @@ object Downloads {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val id = dm.enqueue(req)
             saveTrackedIds(context, trackedIds(context) + id)
-            Toast.makeText(context, "Завантаження: $name", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "${s.errorTitle}: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-    fun list(context: Context): List<DownloadItem> {
+    fun list(context: Context, s: AppStrings): List<DownloadItem> {
         val ids = trackedIds(context)
         if (ids.isEmpty()) return emptyList()
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -107,7 +106,7 @@ object Downloads {
             val uriCol = it.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
             while (it.moveToNext()) {
                 val id = if (idCol >= 0) it.getLong(idCol) else continue
-                val title = if (titleCol >= 0) it.getString(titleCol) ?: "Книга" else "Книга"
+                val title = if (titleCol >= 0) it.getString(titleCol) ?: s.book else s.book
                 val status = if (statusCol >= 0) it.getInt(statusCol) else DownloadManager.STATUS_FAILED
                 val downloaded = if (downloadedCol >= 0) it.getLong(downloadedCol) else 0L
                 val total = if (totalCol >= 0) it.getLong(totalCol) else -1L
@@ -130,12 +129,12 @@ object Downloads {
         saveTrackedIds(context, trackedIds(context) - id)
     }
 
-    fun open(context: Context, id: Long) {
+    fun open(context: Context, id: Long, s: AppStrings) {
         try {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val uri = dm.getUriForDownloadedFile(id)
             if (uri == null) {
-                Toast.makeText(context, "Файл ще не готовий", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, s.fileNotReady, Toast.LENGTH_SHORT).show()
                 return
             }
             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -144,11 +143,11 @@ object Downloads {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             // Дати системі вибрати читалку; якщо типу не впізнає — відкрити як файл
-            val chooser = Intent.createChooser(intent, "Відкрити книгу")
+            val chooser = Intent.createChooser(intent, s.openBook)
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)
         } catch (e: Exception) {
-            Toast.makeText(context, "Не вдалося відкрити: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "${s.openFailed}: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }
