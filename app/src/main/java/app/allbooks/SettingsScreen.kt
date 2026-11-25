@@ -55,6 +55,7 @@ fun SettingsScreen(
     var user by remember { mutableStateOf(settings.proxyUser) }
     var pass by remember { mutableStateOf(settings.proxyPass) }
     var useDoh by remember { mutableStateOf(settings.useDoh) }
+    var notifyNewBooks by remember { mutableStateOf(settings.notifyNewBooks) }
     var theme by remember { mutableStateOf(settings.theme) }
     var startCatalog by remember { mutableStateOf(settings.startCatalog) }
     var folder by remember { mutableStateOf(settings.downloadFolder) }
@@ -72,7 +73,8 @@ fun SettingsScreen(
         downloadFolder = folder.trim().ifEmpty { "BookMriya" },
         folderChosen = true,
         safFolderUri = safFolderUri,
-        theme = theme
+        theme = theme,
+        notifyNewBooks = notifyNewBooks
     )
 
     fun save() {
@@ -297,6 +299,21 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = useDoh, onCheckedChange = { useDoh = it })
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.notifyNewBooksTitle, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        s.notifyNewBooksDesc,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Switch(checked = notifyNewBooks, onCheckedChange = { notifyNewBooks = it })
             }
 
             Spacer(Modifier.height(24.dp))
