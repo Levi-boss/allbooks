@@ -284,6 +284,18 @@ fun SettingsScreen(
                 s.settingsNote,
                 style = MaterialTheme.typography.bodySmall
             )
+
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, AppLog.text())
+                    }
+                    context.startActivity(Intent.createChooser(send, s.shareLogs))
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(s.shareLogs) }
         }
     }
 }
