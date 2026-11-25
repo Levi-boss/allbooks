@@ -115,7 +115,9 @@ data class AppStrings(
     val notifyNewBooksDesc: String,
     val notifyTitle: String,
     val gridView: String,
-    val listView: String
+    val listView: String,
+    val read: String,
+    val readFailed: String
 )
 
 object AppLanguages {
@@ -249,7 +251,9 @@ object AppLanguages {
         notifyNewBooksDesc = "Check subscriptions once a day and notify about new books.",
         notifyTitle = "New books",
         gridView = "Grid",
-        listView = "List"
+        listView = "List",
+        read = "Read",
+        readFailed = "Could not open this book in the reader"
     )
 
     val uk = AppStrings(
@@ -360,7 +364,9 @@ object AppLanguages {
         notifyNewBooksDesc = "Перевіряти підписки раз на день і сповіщати про нові книги.",
         notifyTitle = "Нові книги",
         gridView = "Сітка",
-        listView = "Список"
+        listView = "Список",
+        read = "Читати",
+        readFailed = "Не вдалося відкрити книгу в читалці"
     )
 
     val ru = AppStrings(
@@ -471,6 +477,8 @@ object AppLanguages {
         notifyNewBooksDesc = "Проверять подписки раз в день и сообщать о новых книгах.",
         notifyTitle = "Новые книги",
         gridView = "Сетка",
-        listView = "Список"
+        listView = "Список",
+        read = "Читать",
+        readFailed = "Не удалось открыть книгу в читалке"
     )
 }
