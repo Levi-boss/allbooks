@@ -34,7 +34,9 @@ data class NetSettings(
     /** Тема застосунку: "system" (як у телефоні), "light", "dark". */
     val theme: String = "system",
     /** Сповіщати про нові книги в підписках (перевірка раз на день). */
-    val notifyNewBooks: Boolean = true
+    val notifyNewBooks: Boolean = true,
+    /** Стрічки каталогів — сіткою обкладинок замість списку. */
+    val feedGrid: Boolean = false
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
