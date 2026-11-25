@@ -93,7 +93,7 @@ object AppLanguages {
     }
 
     val en = AppStrings(
-        appName = "All Books",
+        appName = "BookMriya",
         loading = "Loading…",
         downloads = "Downloads",
         settings = "Settings",
@@ -155,7 +155,7 @@ object AppLanguages {
     )
 
     val uk = AppStrings(
-        appName = "All Books",
+        appName = "BookMriya",
         loading = "Завантаження…",
         downloads = "Завантаження",
         settings = "Налаштування",
@@ -217,7 +217,7 @@ object AppLanguages {
     )
 
     val ru = AppStrings(
-        appName = "All Books",
+        appName = "BookMriya",
         loading = "Загрузка…",
         downloads = "Загрузки",
         settings = "Настройки",
