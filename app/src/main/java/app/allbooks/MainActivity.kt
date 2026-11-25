@@ -243,7 +243,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 /** Вибір теми: "system" (як у телефоні), "light", "dark". */
 object ThemeChoice {
     var theme by mutableStateOf("system")
@@ -261,6 +260,7 @@ private fun themeIsDark(theme: String): Boolean = when (theme) {
     else -> isSystemInDarkTheme()
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen() {
     val context = LocalContext.current
