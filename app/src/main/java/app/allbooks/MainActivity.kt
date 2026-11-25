@@ -248,6 +248,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AppLog.d("BookMriya start")
         ThemeChoice.set(SettingsStore.load(this).theme)
+        // Фонова перевірка підписок (раз на день), якщо сповіщення ввімкнено.
+        if (SettingsStore.load(this).notifyNewBooks) {
+            SubCheckScheduler.schedule(this)
+        }
         enableEdgeToEdge()
         setContent {
             val dark = themeIsDark(ThemeChoice.theme)
@@ -457,7 +461,12 @@ fun CatalogScreen() {
             language = languagePref,
             catalogs = (CATALOGS + custom).map { it.name },
             onLanguageChange = { languagePref = it; LanguageStore.save(context, it) },
-            onSettingsChange = { settings = it; SettingsStore.save(context, it) },
+            onSettingsChange = {
+                settings = it
+                SettingsStore.save(context, it)
+                if (it.notifyNewBooks) SubCheckScheduler.schedule(context)
+                else SubCheckScheduler.cancel(context)
+            },
             onBack = { showSettings = false }
         )
         return
