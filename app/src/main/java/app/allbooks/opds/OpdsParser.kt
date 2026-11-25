@@ -14,6 +14,7 @@ object OpdsParser {
         p.setInput(input, null)
 
         var feedTitle = ""
+        var feedIcon = ""
         val entries = mutableListOf<Entry>()
         val feedLinks = mutableListOf<Link>()
 
@@ -24,6 +25,10 @@ object OpdsParser {
                     "title" -> {
                         val t = readText(p)
                         if (feedTitle.isEmpty()) feedTitle = t
+                    }
+                    "icon" -> {
+                        val t = readText(p)
+                        if (feedIcon.isEmpty() && t.isNotBlank()) feedIcon = resolve(baseUrl, t)
                     }
                     "link" -> feedLinks.add(readLink(p, baseUrl))
                     "entry" -> entries.add(readEntry(p, baseUrl))
@@ -37,7 +42,7 @@ object OpdsParser {
             it.rel == "search" && it.type.contains("atom")
         }?.href
 
-        return Feed(feedTitle, entries, next, search)
+        return Feed(feedTitle, entries, next, search, feedIcon.ifEmpty { null })
     }
 
     private fun readEntry(p: XmlPullParser, base: String): Entry {
