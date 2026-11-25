@@ -25,7 +25,9 @@ object SettingsStore {
             proxyPort = p.getInt("proxy_port", 0),
             proxyUser = p.getString("proxy_user", "") ?: "",
             proxyPass = p.getString("proxy_pass", "") ?: "",
-            useDoh = p.getBoolean("use_doh", false)
+            useDoh = p.getBoolean("use_doh", false),
+            startCatalog = p.getString("start_catalog", "") ?: "",
+            downloadFolder = p.getString("download_folder", "BookMriya") ?: "BookMriya"
         )
     }
 
@@ -37,6 +39,8 @@ object SettingsStore {
             .putString("proxy_user", s.proxyUser)
             .putString("proxy_pass", s.proxyPass)
             .putBoolean("use_doh", s.useDoh)
+            .putString("start_catalog", s.startCatalog)
+            .putString("download_folder", s.downloadFolder)
             .apply()
     }
 }
