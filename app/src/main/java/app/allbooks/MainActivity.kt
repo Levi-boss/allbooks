@@ -373,7 +373,15 @@ fun CatalogScreen() {
 
     LaunchedEffect(current, reloadKey) {
         searchExpanded = false
-        val urls = current ?: return@LaunchedEffect
+        val urls = current
+        if (urls == null) {
+            // Додому: прибираємо стару стрічку, щоб лупа і помилки
+            // відкритого каталогу не лишалися на головній.
+            feed = null
+            error = null
+            loading = false
+            return@LaunchedEffect
+        }
         loading = true
         error = null
         feed = null
