@@ -20,6 +20,17 @@ jobs:
         with:
           gradle-version: 8.9
 
+      - name: Prepare signing key
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/allbooks.keystore"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/allbooks.keystore" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+          fi
+
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
 
