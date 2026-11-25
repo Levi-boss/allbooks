@@ -113,7 +113,9 @@ data class AppStrings(
     val noSearchResults: String,
     val notifyNewBooksTitle: String,
     val notifyNewBooksDesc: String,
-    val notifyTitle: String
+    val notifyTitle: String,
+    val gridView: String,
+    val listView: String
 )
 
 object AppLanguages {
@@ -245,7 +247,9 @@ object AppLanguages {
         noSearchResults = "Nothing found.",
         notifyNewBooksTitle = "New book notifications",
         notifyNewBooksDesc = "Check subscriptions once a day and notify about new books.",
-        notifyTitle = "New books"
+        notifyTitle = "New books",
+        gridView = "Grid",
+        listView = "List"
     )
 
     val uk = AppStrings(
@@ -354,7 +358,9 @@ object AppLanguages {
         noSearchResults = "Нічого не знайдено.",
         notifyNewBooksTitle = "Сповіщення про нові книги",
         notifyNewBooksDesc = "Перевіряти підписки раз на день і сповіщати про нові книги.",
-        notifyTitle = "Нові книги"
+        notifyTitle = "Нові книги",
+        gridView = "Сітка",
+        listView = "Список"
     )
 
     val ru = AppStrings(
@@ -463,6 +469,8 @@ object AppLanguages {
         noSearchResults = "Ничего не найдено.",
         notifyNewBooksTitle = "Уведомления о новых книгах",
         notifyNewBooksDesc = "Проверять подписки раз в день и сообщать о новых книгах.",
-        notifyTitle = "Новые книги"
+        notifyTitle = "Новые книги",
+        gridView = "Сетка",
+        listView = "Список"
     )
 }
