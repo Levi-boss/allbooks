@@ -246,6 +246,14 @@ fun CatalogScreen() {
         ) {
             storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
+        // Сповіщення про прогрес завантаження (Android 13+ питає окремо).
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            storagePermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     // Вибір папки через файловий менеджер (SAF) при першому запуску.
