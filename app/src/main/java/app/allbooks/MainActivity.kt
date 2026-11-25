@@ -136,10 +136,10 @@ private data class Catalog(
 private val CATALOGS = listOf(
     Catalog(
         "Flibusta",
-        "Російськомовна та українська бібліотека (http)",
+        "Російськомовна та українська бібліотека",
         listOf("http://flibusta.is/opds"),
-        noteEn = "Russian- and Ukrainian-language library (http)",
-        noteRu = "Русскоязычная и украинская библиотека (http)"
+        noteEn = "Russian- and Ukrainian-language library",
+        noteRu = "Русскоязычная и украинская библиотека"
     ),
     Catalog(
         "CoolLib",
