@@ -98,7 +98,11 @@ data class AppStrings(
     val openBook: String,
     val openFailed: String,
     val noAddress: String,
-    val shareLogs: String
+    val shareLogs: String,
+    val themeTitle: String,
+    val themeSystem: String,
+    val themeLight: String,
+    val themeDark: String
 )
 
 object AppLanguages {
@@ -215,7 +219,11 @@ object AppLanguages {
         openBook = "Open book",
         openFailed = "Failed to open",
         noAddress = "No address available",
-        shareLogs = "Share logs"
+        shareLogs = "Share logs",
+        themeTitle = "Theme",
+        themeSystem = "System",
+        themeLight = "Light",
+        themeDark = "Dark"
     )
 
     val uk = AppStrings(
@@ -309,7 +317,11 @@ object AppLanguages {
         openBook = "Відкрити книгу",
         openFailed = "Не вдалося відкрити",
         noAddress = "Немає жодної адреси",
-        shareLogs = "Поділитися логами"
+        shareLogs = "Поділитися логами",
+        themeTitle = "Тема",
+        themeSystem = "Системна",
+        themeLight = "Світла",
+        themeDark = "Темна"
     )
 
     val ru = AppStrings(
@@ -403,6 +415,10 @@ object AppLanguages {
         openBook = "Открыть книгу",
         openFailed = "Не удалось открыть",
         noAddress = "Нет ни одного адреса",
-        shareLogs = "Поделиться логами"
+        shareLogs = "Поделиться логами",
+        themeTitle = "Тема",
+        themeSystem = "Системная",
+        themeLight = "Светлая",
+        themeDark = "Тёмная"
     )
 }
