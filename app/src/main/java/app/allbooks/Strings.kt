@@ -9,6 +9,7 @@ import java.util.Locale
  */
 data class AppStrings(
     val appName: String,
+    val appNameRunes: String,
     val loading: String,
     val downloads: String,
     val settings: String,
@@ -19,6 +20,8 @@ data class AppStrings(
     val search: String,
     val nextPage: String,
     val description: String,
+    val series: String,
+    val menu: String,
     val addCatalogTitle: String,
     val editCatalogTitle: String,
     val name: String,
@@ -94,6 +97,7 @@ object AppLanguages {
 
     val en = AppStrings(
         appName = "BookMriya",
+        appNameRunes = "ᛒᛟᛟᚲᛗᚱᛁᛃᚨ",
         loading = "Loading…",
         downloads = "Downloads",
         settings = "Settings",
@@ -104,6 +108,8 @@ object AppLanguages {
         search = "Search",
         nextPage = "Next →",
         description = "Description",
+        series = "Series",
+        menu = "Menu",
         addCatalogTitle = "Add catalog",
         editCatalogTitle = "Edit catalog",
         name = "Name",
@@ -156,6 +162,7 @@ object AppLanguages {
 
     val uk = AppStrings(
         appName = "BookMriya",
+        appNameRunes = "ᛒᛟᛟᚲᛗᚱᛁᛃᚨ",
         loading = "Завантаження…",
         downloads = "Завантаження",
         settings = "Налаштування",
@@ -166,6 +173,8 @@ object AppLanguages {
         search = "Пошук",
         nextPage = "Далі →",
         description = "Опис",
+        series = "Серія",
+        menu = "Меню",
         addCatalogTitle = "Додати каталог",
         editCatalogTitle = "Редагувати каталог",
         name = "Назва",
@@ -218,6 +227,7 @@ object AppLanguages {
 
     val ru = AppStrings(
         appName = "BookMriya",
+        appNameRunes = "ᛒᛟᛟᚲᛗᚱᛁᛃᚨ",
         loading = "Загрузка…",
         downloads = "Загрузки",
         settings = "Настройки",
@@ -228,6 +238,8 @@ object AppLanguages {
         search = "Поиск",
         nextPage = "Далее →",
         description = "Описание",
+        series = "Серия",
+        menu = "Меню",
         addCatalogTitle = "Добавить каталог",
         editCatalogTitle = "Редактировать каталог",
         name = "Название",
