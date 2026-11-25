@@ -32,7 +32,12 @@ import app.allbooks.net.NetSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MyBooksScreen(s: AppStrings, settings: NetSettings, onBack: () -> Unit) {
+fun MyBooksScreen(
+    s: AppStrings,
+    settings: NetSettings,
+    onBack: () -> Unit,
+    onRead: (MyBook) -> Unit
+) {
     val context = LocalContext.current
     var books by remember { mutableStateOf(MyBooks.list(context, settings, s)) }
     var toDelete by remember { mutableStateOf<MyBook?>(null) }
@@ -120,6 +125,9 @@ fun MyBooksScreen(s: AppStrings, settings: NetSettings, onBack: () -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = { MyBooks.open(context, book, s) }) {
                                 Text(s.open)
+                            }
+                            if (Reader.supports(book.fileName)) {
+                                TextButton(onClick = { onRead(book) }) { Text(s.read) }
                             }
                             TextButton(onClick = { toDelete = book }) { Text(s.delete) }
                         }
