@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val ksFile: String? = System.getenv("KEYSTORE_FILE")
+val ksPass: String? = System.getenv("KEYSTORE_PASSWORD")
+
 android {
     namespace = "app.allbooks"
     compileSdk = 35
@@ -12,11 +15,25 @@ android {
         applicationId = "app.allbooks"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "2.0.0"
     }
 
+    signingConfigs {
+        if (ksFile != null && ksPass != null && file(ksFile).exists()) {
+            create("shared") {
+                storeFile = file(ksFile)
+                storePassword = ksPass
+                keyAlias = "allbooks"
+                keyPassword = ksPass
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfigs.findByName("shared")?.let { signingConfig = it }
+        }
         release {
             isMinifyEnabled = false
         }
