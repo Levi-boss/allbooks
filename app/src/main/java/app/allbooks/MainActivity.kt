@@ -18,6 +18,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,6 +36,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -757,6 +763,18 @@ fun CatalogScreen() {
                             Icon(Icons.Filled.Search, contentDescription = s.search)
                         }
                     }
+                    if (sel == null && feed != null) {
+                        IconButton(onClick = {
+                            val updated = settings.copy(feedGrid = !settings.feedGrid)
+                            settings = updated
+                            SettingsStore.save(context, updated)
+                        }) {
+                            Text(
+                                if (settings.feedGrid) "☰" else "▦",
+                                fontSize = 22.sp
+                            )
+                        }
+                    }
                 }
             )
         }
@@ -955,22 +973,33 @@ fun CatalogScreen() {
                             )
                         }
                     }
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(f.entries) { e ->
-                            EntryRow(
-                                s = s,
-                                e = e,
-                                isNew = newIds.contains(e.id),
-                                onBook = { selected = e },
-                                onOpen = { target -> history.add(listOf(target)) }
-                            )
-                        }
-                        f.nextUrl?.let { next ->
-                            item {
-                                TextButton(
-                                    onClick = { history.add(listOf(next)) },
-                                    modifier = Modifier.padding(8.dp)
-                                ) { Text(s.nextPage) }
+                    if (settings.feedGrid) {
+                        FeedGrid(
+                            s = s,
+                            feed = f,
+                            newIds = newIds,
+                            onBook = { selected = it },
+                            onOpen = { target -> history.add(listOf(target)) },
+                            onNext = { next -> history.add(listOf(next)) }
+                        )
+                    } else {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            items(f.entries) { e ->
+                                EntryRow(
+                                    s = s,
+                                    e = e,
+                                    isNew = newIds.contains(e.id),
+                                    onBook = { selected = e },
+                                    onOpen = { target -> history.add(listOf(target)) }
+                                )
+                            }
+                            f.nextUrl?.let { next ->
+                                item {
+                                    TextButton(
+                                        onClick = { history.add(listOf(next)) },
+                                        modifier = Modifier.padding(8.dp)
+                                    ) { Text(s.nextPage) }
+                                }
                             }
                         }
                     }
@@ -1388,6 +1417,125 @@ private fun FormatChip(format: String, onClick: () -> Unit) {
             .padding(end = 6.dp, bottom = 6.dp)
     ) {
         Text("⬇ " + format.uppercase(), style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+/** Сітка обкладинок (2 колонки): книги — великими картками, навігаційні
+ *  рядки і кнопка «Далі» — на всю ширину. */
+@Composable
+private fun FeedGrid(
+    s: AppStrings,
+    feed: Feed,
+    newIds: Set<String>,
+    onBook: (Entry) -> Unit,
+    onOpen: (String) -> Unit,
+    onNext: (String) -> Unit
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        gridItems(
+            feed.entries,
+            key = { it.id },
+            span = { e -> if (e.isBook) GridItemSpan(1) else GridItemSpan(2) }
+        ) { e ->
+            if (e.isBook) {
+                BookGridCell(
+                    s = s,
+                    e = e,
+                    isNew = newIds.contains(e.id),
+                    onBook = { onBook(e) }
+                )
+            } else {
+                EntryRow(
+                    s = s,
+                    e = e,
+                    isNew = newIds.contains(e.id),
+                    onBook = { onBook(e) },
+                    onOpen = onOpen
+                )
+            }
+        }
+        feed.nextUrl?.let { next ->
+            item(span = { GridItemSpan(2) }) {
+                TextButton(
+                    onClick = { onNext(next) },
+                    modifier = Modifier.padding(8.dp)
+                ) { Text(s.nextPage) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookGridCell(
+    s: AppStrings,
+    e: Entry,
+    isNew: Boolean,
+    onBook: () -> Unit
+) {
+    val cover = e.links.firstOrNull {
+        it.rel.contains("thumbnail") || it.rel.contains("image")
+    }?.href
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onBook() }
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                e.title.take(1).uppercase(),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            if (cover != null) {
+                AsyncImage(
+                    model = cover,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                e.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            if (isNew) {
+                Text(
+                    s.newBadge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+        if (e.authors.isNotEmpty()) {
+            Text(
+                e.authors.joinToString(", ") { it.name },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
