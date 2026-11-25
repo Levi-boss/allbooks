@@ -80,14 +80,22 @@ object Net {
     }
 
     /** Пробує по черзі основну адресу та дзеркала, повертає першу успішну відповідь. */
-    fun fetchFirst(client: OkHttpClient, urls: List<String>): FetchResult {
+    fun fetchFirst(
+        client: OkHttpClient,
+        urls: List<String>,
+        user: String? = null,
+        pass: String? = null
+    ): FetchResult {
         var last: Exception? = null
         for (u in urls) {
             try {
-                val req = Request.Builder()
+                val reqBuilder = Request.Builder()
                     .url(u)
                     .header("User-Agent", "AllBooks/2.0 (Android)")
-                    .build()
+                if (!user.isNullOrBlank()) {
+                    reqBuilder.header("Authorization", Credentials.basic(user, pass ?: ""))
+                }
+                val req = reqBuilder.build()
                 client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
                     val bytes = resp.body?.bytes() ?: ByteArray(0)
