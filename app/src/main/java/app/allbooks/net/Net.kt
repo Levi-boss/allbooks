@@ -1,5 +1,6 @@
 package app.allbooks.net
 
+import app.allbooks.AppLog
 import okhttp3.Authenticator
 import okhttp3.Credentials
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -112,9 +113,11 @@ object Net {
                         throw IOException("HTTP ${resp.code}$challenge: $u")
                     }
                     val bytes = resp.body?.bytes() ?: ByteArray(0)
+                    AppLog.d("GET $u -> ${resp.code}")
                     return FetchResult(resp.request.url.toString(), bytes)
                 }
             } catch (e: Exception) {
+                AppLog.d("GET $u failed: ${e.message}")
                 last = e
             }
         }
