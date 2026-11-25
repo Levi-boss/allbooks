@@ -38,7 +38,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -281,17 +284,22 @@ fun CatalogScreen() {
     val sel = selected
     val title = when {
         sel != null -> sel.title
-        current == null -> s.appName
+        current == null -> s.appNameRunes
         else -> feed?.title ?: s.loading
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     if (current == null && sel == null) {
-                        TextButton(onClick = { showMenu = true }) { Text("⋮") }
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_gear_old),
+                                contentDescription = s.menu
+                            )
+                        }
                         DropdownMenu(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
@@ -332,6 +340,10 @@ fun CatalogScreen() {
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
+                    },
+                    onSeries = { url ->
+                        selected = null
+                        history.add(listOf(url))
                     },
                     onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass) }
                 )
@@ -403,6 +415,7 @@ private fun BookDetail(
     s: AppStrings,
     e: Entry,
     onAuthor: (Author) -> Unit,
+    onSeries: (String) -> Unit,
     onDownload: (Link) -> Unit
 ) {
     val cover = e.links.firstOrNull { it.rel == "http://opds-spec.org/image" }?.href
@@ -410,6 +423,10 @@ private fun BookDetail(
             it.rel.contains("thumbnail") || it.rel.contains("image")
         }?.href
     val downloads = e.links.filter { it.isAcquisition }.distinctBy { it.format }
+    // Рядок «Серия: …» показуємо окремо, активним, тому прибираємо його з опису.
+    val summaryText = e.summary.lines()
+        .filterNot { it.trim().startsWith("Серия:", ignoreCase = true) }
+        .joinToString("\n").trim()
 
     Column(
         Modifier
@@ -450,11 +467,24 @@ private fun BookDetail(
             }
         }
 
-        if (e.summary.isNotBlank()) {
+        val seriesLink = e.seriesLink
+        val seriesName = e.seriesName
+        if (seriesLink != null && seriesName != null) {
+            Spacer(Modifier.height(16.dp))
+            TextButton(onClick = { onSeries(seriesLink.href) }) {
+                Text(
+                    s.series + ": " + seriesName +
+                        (e.seriesNumber?.let { " #$it" } ?: ""),
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+
+        if (summaryText.isNotBlank()) {
             Spacer(Modifier.height(16.dp))
             Text(s.description, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
-            Text(e.summary, style = MaterialTheme.typography.bodyMedium)
+            Text(summaryText, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
