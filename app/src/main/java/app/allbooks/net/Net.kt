@@ -30,7 +30,9 @@ data class NetSettings(
     /** Чи вибирав користувач папку сам (в налаштуваннях або при першому запуску). */
     val folderChosen: Boolean = false,
     /** Адреса папки, вибраної через файловий менеджер (SAF); порожньо — Завантаження. */
-    val safFolderUri: String = ""
+    val safFolderUri: String = "",
+    /** Тема застосунку: "system" (як у телефоні), "light", "dark". */
+    val theme: String = "system"
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
