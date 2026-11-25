@@ -32,7 +32,9 @@ data class NetSettings(
     /** Адреса папки, вибраної через файловий менеджер (SAF); порожньо — Завантаження. */
     val safFolderUri: String = "",
     /** Тема застосунку: "system" (як у телефоні), "light", "dark". */
-    val theme: String = "system"
+    val theme: String = "system",
+    /** Сповіщати про нові книги в підписках (перевірка раз на день). */
+    val notifyNewBooks: Boolean = true
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
