@@ -27,7 +27,9 @@ data class NetSettings(
     /** Підпапка в Завантаженнях для книжок; порожньо — BookMriya. */
     val downloadFolder: String = "BookMriya",
     /** Чи вибирав користувач папку сам (в налаштуваннях або при першому запуску). */
-    val folderChosen: Boolean = false
+    val folderChosen: Boolean = false,
+    /** Адреса папки, вибраної через файловий менеджер (SAF); порожньо — Завантаження. */
+    val safFolderUri: String = ""
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
