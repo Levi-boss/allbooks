@@ -1,0 +1,42 @@
+package app.allbooks
+
+import android.content.Context
+import app.allbooks.net.NetSettings
+import app.allbooks.net.ProxyMode
+
+/**
+ * Зберігання налаштувань мережі (проксі, DoH) в SharedPreferences.
+ * Пароль проксі зберігається у відкритому вигляді, як і в оригінальному
+ * All Books (логін/пароль сервера) — це локальне сховище застосунку.
+ */
+object SettingsStore {
+    private const val PREFS = "allbooks_settings"
+
+    fun load(c: Context): NetSettings {
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val mode = try {
+            ProxyMode.valueOf(p.getString("proxy_mode", "NONE") ?: "NONE")
+        } catch (e: Exception) {
+            ProxyMode.NONE
+        }
+        return NetSettings(
+            proxyMode = mode,
+            proxyHost = p.getString("proxy_host", "") ?: "",
+            proxyPort = p.getInt("proxy_port", 0),
+            proxyUser = p.getString("proxy_user", "") ?: "",
+            proxyPass = p.getString("proxy_pass", "") ?: "",
+            useDoh = p.getBoolean("use_doh", false)
+        )
+    }
+
+    fun save(c: Context, s: NetSettings) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("proxy_mode", s.proxyMode.name)
+            .putString("proxy_host", s.proxyHost)
+            .putInt("proxy_port", s.proxyPort)
+            .putString("proxy_user", s.proxyUser)
+            .putString("proxy_pass", s.proxyPass)
+            .putBoolean("use_doh", s.useDoh)
+            .apply()
+    }
+}
