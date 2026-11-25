@@ -21,7 +21,11 @@ data class NetSettings(
     val proxyPort: Int = 0,
     val proxyUser: String = "",
     val proxyPass: String = "",
-    val useDoh: Boolean = false
+    val useDoh: Boolean = false,
+    /** Назва каталогу, що відкривається при запуску; порожньо — список каталогів. */
+    val startCatalog: String = "",
+    /** Підпапка в Завантаженнях для книжок; порожньо — BookMriya. */
+    val downloadFolder: String = "BookMriya"
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
