@@ -50,10 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.Net
-import app.allbooks.net.NetSettings
 import app.allbooks.opds.Author
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Feed
@@ -66,7 +67,13 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.net.URLEncoder
 
-private data class Catalog(val name: String, val note: String, val urls: List<String>)
+private data class Catalog(
+    val name: String,
+    val note: String,
+    val urls: List<String>,
+    val user: String = "",
+    val pass: String = ""
+)
 
 private val CATALOGS = listOf(
     Catalog(
@@ -106,17 +113,25 @@ private object CustomStore {
     fun load(c: Context): List<Catalog> {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
         return raw.lines().mapNotNull { line ->
-            val i = line.indexOf('|')
-            if (i <= 0) null
+            // Формат: назва|адреса|логін|пароль. Старі записи без логіна/пароля теж читаються.
+            val parts = line.split('|')
+            if (parts.size < 2 || parts[0].isBlank()) null
             else {
-                val url = line.substring(i + 1)
-                Catalog(line.substring(0, i), url, listOf(url))
+                val url = parts[1]
+                Catalog(
+                    parts[0], url, listOf(url),
+                    user = parts.getOrNull(2) ?: "",
+                    pass = parts.getOrNull(3) ?: ""
+                )
             }
         }
     }
 
     fun save(c: Context, list: List<Catalog>) {
-        val raw = list.joinToString("\n") { it.name + "|" + it.urls.first() }
+        val raw = list.joinToString("\n") {
+            val clean = { s: String -> s.replace("|", " ").replace("\n", " ").trim() }
+            clean(it.name) + "|" + clean(it.urls.first()) + "|" + clean(it.user) + "|" + it.pass.replace("|", " ").replace("\n", " ")
+        }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, raw).apply()
     }
@@ -166,6 +181,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CatalogScreen() {
     val context = LocalContext.current
+    var settings by remember { mutableStateOf(SettingsStore.load(context)) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showDownloads by remember { mutableStateOf(false) }
+    var editingCatalog by remember { mutableStateOf<Catalog?>(null) }
+    var currentCatalog by remember { mutableStateOf<Catalog?>(null) }
     val history = remember { mutableStateListOf<List<String>>() }
     val current = history.lastOrNull()
     var feed by remember { mutableStateOf<Feed?>(null) }
@@ -184,8 +204,8 @@ fun CatalogScreen() {
         feed = null
         try {
             feed = withContext(Dispatchers.IO) {
-                val client = Net.buildClient(NetSettings())
-                val r = Net.fetchFirst(client, urls)
+                val client = Net.buildClient(settings)
+                val r = Net.fetchFirst(client, urls, currentCatalog?.user, currentCatalog?.pass)
                 OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
             }
         } catch (e: CancellationException) {
@@ -198,24 +218,48 @@ fun CatalogScreen() {
 
     BackHandler(enabled = history.isNotEmpty()) {
         history.removeAt(history.lastIndex)
+        if (history.isEmpty()) currentCatalog = null
+    }
+    BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showDownloads) { showDownloads = false }
+    if (showSettings) {
+        SettingsScreen(
+            settings = settings,
+            onSettingsChange = { settings = it; SettingsStore.save(context, it) },
+            onBack = { showSettings = false }
+        )
+        return
+    }
+    if (showDownloads) {
+        DownloadsScreen(onBack = { showDownloads = false })
+        return
     }
     BackHandler(enabled = selected != null) {
         selected = null
     }
 
-    if (showAdd) {
-        AddCatalogDialog(
-            onDismiss = { showAdd = false },
-            onAdd = { name, url ->
+    if (showAdd || editingCatalog != null) {
+        CatalogDialog(
+            initial = editingCatalog,
+            onDismiss = { showAdd = false; editingCatalog = null },
+            onSave = { name, url, user, pass ->
                 var u = url.trim()
                 if (u.isNotEmpty() && !u.startsWith("http", ignoreCase = true)) {
                     u = "https://$u"
                 }
                 val n = name.replace("|", " ").replace("\n", " ").trim().ifEmpty { u }
                 if (u.length > 8) {
-                    custom = custom + Catalog(n, u, listOf(u))
+                    val cat = Catalog(n, u, listOf(u), user.trim(), pass)
+                    val old = editingCatalog
+                    if (old != null) {
+                        custom = custom.map { if (it == old) cat else it }
+                        if (currentCatalog == old) currentCatalog = cat
+                    } else {
+                        custom = custom + cat
+                    }
                     CustomStore.save(context, custom)
                     showAdd = false
+                    editingCatalog = null
                 }
             }
         )
@@ -234,6 +278,8 @@ fun CatalogScreen() {
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     if (current == null && sel == null) {
+                        TextButton(onClick = { showDownloads = true }) { Text("Завантаження") }
+                        TextButton(onClick = { showSettings = true }) { Text("Налаштування") }
                         TextButton(onClick = { showAdd = true }) { Text("+ Додати") }
                     }
                 }
@@ -258,15 +304,16 @@ fun CatalogScreen() {
                             ).show()
                         }
                     },
-                    onDownload = { link -> Downloads.start(context, sel, link) }
+                    onDownload = { link -> Downloads.start(context, sel, link, currentCatalog?.user, currentCatalog?.pass) }
                 )
                 current == null -> HomeList(
                     custom = custom,
-                    onOpen = { c -> history.add(c.urls) },
+                    onOpen = { c -> currentCatalog = c; history.add(c.urls) },
                     onDelete = { c ->
                         custom = custom - c
                         CustomStore.save(context, custom)
-                    }
+                    },
+                    onEdit = { c -> editingCatalog = c }
                 )
                 loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 error != null -> Column(
@@ -301,7 +348,7 @@ fun CatalogScreen() {
                             EntryRow(
                                 e,
                                 onBook = { selected = e },
-                                onDownload = { link -> Downloads.start(context, e, link) },
+                                onDownload = { link -> Downloads.start(context, e, link, currentCatalog?.user, currentCatalog?.pass) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
                         }
@@ -381,12 +428,18 @@ private fun BookDetail(
 }
 
 @Composable
-private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
+private fun CatalogDialog(
+    initial: Catalog?,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String) -> Unit
+) {
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var url by remember { mutableStateOf(initial?.urls?.firstOrNull() ?: "") }
+    var user by remember { mutableStateOf(initial?.user ?: "") }
+    var pass by remember { mutableStateOf(initial?.pass ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Додати каталог") },
+        title = { Text(if (initial == null) "Додати каталог" else "Редагувати каталог") },
         text = {
             Column {
                 OutlinedTextField(
@@ -402,9 +455,32 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> U
                     singleLine = true,
                     label = { Text("OPDS-адреса") }
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    singleLine = true,
+                    label = { Text("Логін (необов'язково)") }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = pass,
+                    onValueChange = { pass = it },
+                    singleLine = true,
+                    label = { Text("Пароль (необов'язково)") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                if (initial == null) {
+                    Text(
+                        "Логін і пароль потрібні тільки для каталогів із авторизацією.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onAdd(name, url) }) { Text("Додати") } },
+        confirmButton = { TextButton(onClick = { onSave(name, url, user, pass) }) { Text(if (initial == null) "Додати" else "Зберегти") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Скасувати") } }
     )
 }
@@ -413,10 +489,11 @@ private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> U
 private fun HomeList(
     custom: List<Catalog>,
     onOpen: (Catalog) -> Unit,
-    onDelete: (Catalog) -> Unit
+    onDelete: (Catalog) -> Unit,
+    onEdit: (Catalog) -> Unit
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
-        items(CATALOGS) { c -> CatalogRow(c, onOpen, null) }
+        items(CATALOGS) { c -> CatalogRow(c, onOpen, null, null) }
         if (custom.isNotEmpty()) {
             item {
                 Text(
@@ -426,13 +503,18 @@ private fun HomeList(
                     modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp)
                 )
             }
-            items(custom) { c -> CatalogRow(c, onOpen) { onDelete(c) } }
+            items(custom) { c -> CatalogRow(c, onOpen, { onDelete(c) }, { onEdit(c) }) }
         }
     }
 }
 
 @Composable
-private fun CatalogRow(c: Catalog, onOpen: (Catalog) -> Unit, onDelete: (() -> Unit)?) {
+private fun CatalogRow(
+    c: Catalog,
+    onOpen: (Catalog) -> Unit,
+    onDelete: (() -> Unit)?,
+    onEdit: (() -> Unit)? = null
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -448,6 +530,12 @@ private fun CatalogRow(c: Catalog, onOpen: (Catalog) -> Unit, onDelete: (() -> U
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+        if (c.user.isNotBlank()) {
+            Text("🔒", modifier = Modifier.padding(end = 4.dp))
+        }
+        if (onEdit != null) {
+            TextButton(onClick = onEdit) { Text("Редагувати") }
         }
         if (onDelete != null) {
             TextButton(onClick = onDelete) { Text("Видалити") }
