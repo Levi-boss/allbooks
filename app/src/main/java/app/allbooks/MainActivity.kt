@@ -1,5 +1,6 @@
 package app.allbooks
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,6 +95,29 @@ private val CATALOGS = listOf(
     )
 )
 
+private object CustomStore {
+    private const val PREFS = "allbooks"
+    private const val KEY = "custom_catalogs"
+
+    fun load(c: Context): List<Catalog> {
+        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
+        return raw.lines().mapNotNull { line ->
+            val i = line.indexOf('|')
+            if (i <= 0) null
+            else {
+                val url = line.substring(i + 1)
+                Catalog(line.substring(0, i), url, listOf(url))
+            }
+        }
+    }
+
+    fun save(c: Context, list: List<Catalog>) {
+        val raw = list.joinToString("\n") { it.name + "|" + it.urls.first() }
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY, raw).apply()
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,6 +143,8 @@ fun CatalogScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
+    var custom by remember { mutableStateOf(CustomStore.load(context)) }
+    var showAdd by remember { mutableStateOf(false) }
 
     LaunchedEffect(current, reloadKey) {
         val urls = current ?: return@LaunchedEffect
@@ -142,19 +169,49 @@ fun CatalogScreen() {
         history.removeAt(history.lastIndex)
     }
 
+    if (showAdd) {
+        AddCatalogDialog(
+            onDismiss = { showAdd = false },
+            onAdd = { name, url ->
+                var u = url.trim()
+                if (u.isNotEmpty() && !u.startsWith("http", ignoreCase = true)) {
+                    u = "https://$u"
+                }
+                val n = name.replace("|", " ").replace("\n", " ").trim().ifEmpty { u }
+                if (u.length > 8) {
+                    custom = custom + Catalog(n, u, listOf(u))
+                    CustomStore.save(context, custom)
+                    showAdd = false
+                }
+            }
+        )
+    }
+
     val title = if (current == null) "All Books" else (feed?.title ?: "Завантаження…")
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                actions = {
+                    if (current == null) {
+                        TextButton(onClick = { showAdd = true }) { Text("+ Додати") }
+                    }
+                }
             )
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             val f = feed
             when {
-                current == null -> HomeList { c -> history.add(c.urls) }
+                current == null -> HomeList(
+                    custom = custom,
+                    onOpen = { c -> history.add(c.urls) },
+                    onDelete = { c ->
+                        custom = custom - c
+                        CustomStore.save(context, custom)
+                    }
+                )
                 loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 error != null -> Column(
                     Modifier.align(Alignment.Center).padding(24.dp),
@@ -211,21 +268,79 @@ fun CatalogScreen() {
 }
 
 @Composable
-private fun HomeList(onOpen: (Catalog) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(CATALOGS) { c ->
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpen(c) }
-                    .padding(horizontal = 16.dp, vertical = 16.dp)
-            ) {
-                Text(c.name, style = MaterialTheme.typography.titleMedium)
-                Text(c.note, style = MaterialTheme.typography.bodySmall)
+private fun AddCatalogDialog(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Додати каталог") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("Назва") }
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    singleLine = true,
+                    label = { Text("OPDS-адреса") }
+                )
             }
-            HorizontalDivider()
+        },
+        confirmButton = { TextButton(onClick = { onAdd(name, url) }) { Text("Додати") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Скасувати") } }
+    )
+}
+
+@Composable
+private fun HomeList(
+    custom: List<Catalog>,
+    onOpen: (Catalog) -> Unit,
+    onDelete: (Catalog) -> Unit
+) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(CATALOGS) { c -> CatalogRow(c, onOpen, null) }
+        if (custom.isNotEmpty()) {
+            item {
+                Text(
+                    "Мої каталоги",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp)
+                )
+            }
+            items(custom) { c -> CatalogRow(c, onOpen) { onDelete(c) } }
         }
     }
+}
+
+@Composable
+private fun CatalogRow(c: Catalog, onOpen: (Catalog) -> Unit, onDelete: (() -> Unit)?) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onOpen(c) }
+            .padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(c.name, style = MaterialTheme.typography.titleMedium)
+            Text(
+                c.note,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (onDelete != null) {
+            TextButton(onClick = onDelete) { Text("Видалити") }
+        }
+    }
+    HorizontalDivider()
 }
 
 @Composable
