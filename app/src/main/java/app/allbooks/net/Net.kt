@@ -25,7 +25,9 @@ data class NetSettings(
     /** Назва каталогу, що відкривається при запуску; порожньо — список каталогів. */
     val startCatalog: String = "",
     /** Підпапка в Завантаженнях для книжок; порожньо — BookMriya. */
-    val downloadFolder: String = "BookMriya"
+    val downloadFolder: String = "BookMriya",
+    /** Чи вибирав користувач папку сам (в налаштуваннях або при першому запуску). */
+    val folderChosen: Boolean = false
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
