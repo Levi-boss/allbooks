@@ -1,13 +1,18 @@
 package app.allbooks
 
 import android.app.DownloadManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.widget.Toast
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import app.allbooks.net.Net
 import app.allbooks.net.NetSettings
 import app.allbooks.opds.Entry
@@ -125,6 +130,56 @@ object Downloads {
             .mapNotNull { readSafItem(c, it) }
     }
 
+    // --- Сповіщення про прогрес (для SAF-завантажень; у DownloadManager
+    // своє сповіщення вже є). Канал — низької важливості, без звуку.
+    private const val CHANNEL_ID = "bookmriya_downloads"
+
+    private fun notificationId(id: Long): Int = (id and 0x7fffffff).toInt()
+
+    private fun ensureChannel(c: Context, s: AppStrings) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, s.downloads, NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+    }
+
+    private fun showSafNotification(c: Context, s: AppStrings, item: DownloadItem) {
+        ensureChannel(c, s)
+        val builder = NotificationCompat.Builder(c, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(item.title)
+            .setOngoing(item.isActive)
+            .setAutoCancel(!item.isActive)
+            .setOnlyAlertOnce(true)
+        when {
+            item.isSuccessful -> {
+                builder.setContentText("${s.statusSuccessful}: ${item.fileName}")
+                    .setProgress(0, 0, false)
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            }
+            item.isFailed -> {
+                builder.setContentText("${s.statusFailed}: ${item.fileName}")
+                    .setProgress(0, 0, false)
+            }
+            item.total > 0 -> {
+                builder.setContentText("${s.downloading}: ${item.percent}%")
+                    .setProgress(100, item.percent, false)
+            }
+            else -> {
+                builder.setContentText(s.downloading)
+                    .setProgress(0, 0, true)
+            }
+        }
+        NotificationManagerCompat.from(c).notify(notificationId(item.id), builder.build())
+    }
+
+    private fun cancelSafNotification(c: Context, id: Long) {
+        NotificationManagerCompat.from(c).cancel(notificationId(id))
+    }
+
     fun extension(link: Link): String {
         val t = link.type.lowercase()
         return if (t.contains("fb2") && t.contains("zip")) "fb2.zip" else link.format
@@ -239,6 +294,7 @@ object Downloads {
             listOf(url, title, name, folderUri, user ?: "", pass ?: "", "saf")
                 .joinToString("\u0001")
         )
+        showSafNotification(appContext, s, item)
         Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         safScope.launch {
             var downloaded = 0L
@@ -246,13 +302,12 @@ object Downloads {
             var docUri: Uri? = null
             var lastSave = 0L
             fun saveProgress(status: Int) {
-                saveSafItem(
-                    appContext,
-                    item.copy(
-                        status = status, downloaded = downloaded, total = total,
-                        safDocUri = docUri?.toString() ?: ""
-                    )
+                val cur = item.copy(
+                    status = status, downloaded = downloaded, total = total,
+                    safDocUri = docUri?.toString() ?: ""
                 )
+                saveSafItem(appContext, cur)
+                showSafNotification(appContext, s, cur)
             }
             try {
                 val treeUri = Uri.parse(folderUri)
@@ -355,6 +410,7 @@ object Downloads {
             }
             clearSafItem(context, id)
             clearMeta(context, id)
+            cancelSafNotification(context, id)
             return
         }
         try {
