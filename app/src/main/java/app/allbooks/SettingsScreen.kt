@@ -37,7 +37,10 @@ import app.allbooks.net.ProxyMode
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    s: AppStrings,
     settings: NetSettings,
+    language: String,
+    onLanguageChange: (String) -> Unit,
     onSettingsChange: (NetSettings) -> Unit,
     onBack: () -> Unit
 ) {
@@ -64,9 +67,9 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Налаштування") },
+                title = { Text(s.settings) },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("‹ Назад") }
+                    TextButton(onClick = onBack) { Text(s.back) }
                 }
             )
         }
@@ -78,10 +81,36 @@ fun SettingsScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("Проксі", style = MaterialTheme.typography.titleMedium)
+            Text(s.language, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            for ((code, label) in listOf(
+                AppLanguages.AUTO to s.languageAuto,
+                AppLanguages.EN to "English",
+                AppLanguages.UK to "Українська",
+                AppLanguages.RU to "Русский"
+            )) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onLanguageChange(code) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = language == code, onClick = { onLanguageChange(code) })
+                    Text(label, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+            Text(
+                s.languageNote,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            Spacer(Modifier.height(24.dp))
+            Text(s.proxy, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             for ((m, label) in listOf(
-                ProxyMode.NONE to "Вимкнено",
+                ProxyMode.NONE to s.proxyOff,
                 ProxyMode.HTTP to "HTTP",
                 ProxyMode.SOCKS5 to "SOCKS5"
             )) {
@@ -103,8 +132,8 @@ fun SettingsScreen(
                     value = host,
                     onValueChange = { host = it },
                     singleLine = true,
-                    label = { Text("Хост проксі") },
-                    placeholder = { Text("наприклад, 127.0.0.1") },
+                    label = { Text(s.proxyHost) },
+                    placeholder = { Text(s.proxyHostHint) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -112,8 +141,8 @@ fun SettingsScreen(
                     value = port,
                     onValueChange = { port = it.filter { ch -> ch.isDigit() } },
                     singleLine = true,
-                    label = { Text("Порт") },
-                    placeholder = { Text("наприклад, 1080") },
+                    label = { Text(s.proxyPort) },
+                    placeholder = { Text(s.proxyPortHint) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -122,7 +151,7 @@ fun SettingsScreen(
                     value = user,
                     onValueChange = { user = it },
                     singleLine = true,
-                    label = { Text("Логін проксі (необов'язково)") },
+                    label = { Text(s.proxyLoginOptional) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -130,13 +159,13 @@ fun SettingsScreen(
                     value = pass,
                     onValueChange = { pass = it },
                     singleLine = true,
-                    label = { Text("Пароль проксі (необов'язково)") },
+                    label = { Text(s.proxyPasswordOptional) },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    "Без хоста і порту проксі не ввімкнеться, навіть якщо вибрано HTTP/SOCKS5.",
+                    s.proxyNote,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp)
                 )
@@ -148,9 +177,9 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("DNS через HTTPS (DoH)", style = MaterialTheme.typography.titleMedium)
+                    Text(s.dohTitle, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "DNS-запити через Cloudflare (1.1.1.1). Допомагає, коли провайдер блокує адреси каталогів.",
+                        s.dohDesc,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -164,10 +193,10 @@ fun SettingsScreen(
                     onBack()
                 },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Зберегти") }
+            ) { Text(s.save) }
             Spacer(Modifier.height(8.dp))
             Text(
-                "Налаштування застосовуються до наступного завантаження каталогу.",
+                s.settingsNote,
                 style = MaterialTheme.typography.bodySmall
             )
         }
