@@ -202,6 +202,7 @@ object Downloads {
             .take(80)
             .ifEmpty { "book" }
         val name = "$safe.${extension(link)}"
+        AppLog.d("Download start: $name (${link.format}) via ${if (safFolderUri.isNotBlank()) "saf" else "dm"}")
         if (safFolderUri.isNotBlank()) {
             startSaf(context, link.href, entry.title, name, safFolderUri, user, pass, settings, s)
         } else {
@@ -260,6 +261,7 @@ object Downloads {
             )
             Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
+            AppLog.d("Download failed (dm): $name: ${e.message}")
             Toast.makeText(context, "${s.errorTitle}: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
@@ -350,6 +352,7 @@ object Downloads {
                 }
                 saveProgress(DownloadManager.STATUS_SUCCESSFUL)
             } catch (e: Exception) {
+                AppLog.d("Download failed (saf): $name: ${e.message}")
                 if (docUri != null) {
                     try {
                         DocumentsContract.deleteDocument(appContext.contentResolver, docUri)
