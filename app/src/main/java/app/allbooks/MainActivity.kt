@@ -74,8 +74,16 @@ private data class Catalog(
     val note: String,
     val urls: List<String>,
     val user: String = "",
-    val pass: String = ""
-)
+    val pass: String = "",
+    val noteEn: String = note,
+    val noteRu: String = note
+) {
+    fun noteFor(lang: String): String = when (lang) {
+        "en" -> noteEn
+        "ru" -> noteRu
+        else -> note
+    }
+}
 
 // Тільки перевірені 25.11.2026 каталоги. Видалено: Gutenberg — весь сайт дає 503,
 // ManyBooks — 403, OAPEN — OPDS-адреса дає 404.
@@ -83,17 +91,23 @@ private val CATALOGS = listOf(
     Catalog(
         "Flibusta",
         "Російськомовна та українська бібліотека (http)",
-        listOf("http://flibusta.is/opds")
+        listOf("http://flibusta.is/opds"),
+        noteEn = "Russian- and Ukrainian-language library (http)",
+        noteRu = "Русскоязычная и украинская библиотека (http)"
     ),
     Catalog(
         "CoolLib",
         "Російськомовна та українська бібліотека",
-        listOf("https://coollib.com/opds")
+        listOf("https://coollib.com/opds"),
+        noteEn = "Russian- and Ukrainian-language library",
+        noteRu = "Русскоязычная и украинская библиотека"
     ),
     Catalog(
         "unglue.it",
         "Книги під вільними ліцензіями",
-        listOf("https://unglue.it/api/opds/")
+        listOf("https://unglue.it/api/opds/"),
+        noteEn = "Books under free licenses",
+        noteRu = "Книги под свободными лицензиями"
     )
 )
 
@@ -173,6 +187,9 @@ class MainActivity : ComponentActivity() {
 fun CatalogScreen() {
     val context = LocalContext.current
     var settings by remember { mutableStateOf(SettingsStore.load(context)) }
+    var languagePref by remember { mutableStateOf(LanguageStore.load(context)) }
+    val lang = AppLanguages.resolve(languagePref)
+    val s = AppLanguages.stringsFor(lang)
     var showSettings by remember { mutableStateOf(false) }
     var showDownloads by remember { mutableStateOf(false) }
     var editingCatalog by remember { mutableStateOf<Catalog?>(null) }
@@ -203,7 +220,7 @@ fun CatalogScreen() {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = e.message ?: e.javaClass.simpleName
+            error = if (e.message == "Немає жодної адреси") s.noAddress else e.message ?: e.javaClass.simpleName
         }
         loading = false
     }
@@ -216,14 +233,17 @@ fun CatalogScreen() {
     BackHandler(enabled = showDownloads) { showDownloads = false }
     if (showSettings) {
         SettingsScreen(
+            s = s,
             settings = settings,
+            language = languagePref,
+            onLanguageChange = { languagePref = it; LanguageStore.save(context, it) },
             onSettingsChange = { settings = it; SettingsStore.save(context, it) },
             onBack = { showSettings = false }
         )
         return
     }
     if (showDownloads) {
-        DownloadsScreen(onBack = { showDownloads = false })
+        DownloadsScreen(s = s, onBack = { showDownloads = false })
         return
     }
     BackHandler(enabled = selected != null) {
@@ -232,6 +252,7 @@ fun CatalogScreen() {
 
     if (showAdd || editingCatalog != null) {
         CatalogDialog(
+            s = s,
             initial = editingCatalog,
             onDismiss = { showAdd = false; editingCatalog = null },
             onSave = { name, url, user, pass ->
@@ -260,8 +281,8 @@ fun CatalogScreen() {
     val sel = selected
     val title = when {
         sel != null -> sel.title
-        current == null -> "All Books"
-        else -> feed?.title ?: "Завантаження…"
+        current == null -> s.appName
+        else -> feed?.title ?: s.loading
     }
 
     Scaffold(
@@ -276,15 +297,15 @@ fun CatalogScreen() {
                             onDismissRequest = { showMenu = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Завантаження") },
+                                text = { Text(s.downloads) },
                                 onClick = { showMenu = false; showDownloads = true }
                             )
                             DropdownMenuItem(
-                                text = { Text("Налаштування") },
+                                text = { Text(s.settings) },
                                 onClick = { showMenu = false; showSettings = true }
                             )
                             DropdownMenuItem(
-                                text = { Text("+ Додати каталог") },
+                                text = { Text(s.addCatalog) },
                                 onClick = { showMenu = false; showAdd = true }
                             )
                         }
@@ -297,6 +318,7 @@ fun CatalogScreen() {
             val f = feed
             when {
                 sel != null -> BookDetail(
+                    s = s,
                     e = sel,
                     onAuthor = { a ->
                         val target = authorTarget(a, sel, f?.searchUrl)
@@ -306,14 +328,16 @@ fun CatalogScreen() {
                         } else {
                             Toast.makeText(
                                 context,
-                                "Для цього каталогу перехід по автору недоступний",
+                                s.authorUnavailable,
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
                     },
-                    onDownload = { link -> Downloads.start(context, sel, link, currentCatalog?.user, currentCatalog?.pass) }
+                    onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass) }
                 )
                 current == null -> HomeList(
+                    s = s,
+                    lang = lang,
                     custom = custom,
                     onOpen = { c -> currentCatalog = c; history.add(c.urls) },
                     onDelete = { c ->
@@ -327,9 +351,9 @@ fun CatalogScreen() {
                     Modifier.align(Alignment.Center).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("Помилка: $error")
+                    Text("${s.errorTitle}: $error")
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = { reloadKey++ }) { Text("Повторити") }
+                    Button(onClick = { reloadKey++ }) { Text(s.retry) }
                 }
                 f != null -> Column(Modifier.fillMaxSize()) {
                     f.searchUrl?.let { template ->
@@ -340,7 +364,7 @@ fun CatalogScreen() {
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                             singleLine = true,
-                            placeholder = { Text("Пошук") },
+                            placeholder = { Text(s.search) },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = {
                                 val q = query.trim()
@@ -355,7 +379,7 @@ fun CatalogScreen() {
                             EntryRow(
                                 e,
                                 onBook = { selected = e },
-                                onDownload = { link -> Downloads.start(context, e, link, currentCatalog?.user, currentCatalog?.pass) },
+                                onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
                         }
@@ -364,7 +388,7 @@ fun CatalogScreen() {
                                 TextButton(
                                     onClick = { history.add(listOf(next)) },
                                     modifier = Modifier.padding(8.dp)
-                                ) { Text("Далі →") }
+                                ) { Text(s.nextPage) }
                             }
                         }
                     }
@@ -376,6 +400,7 @@ fun CatalogScreen() {
 
 @Composable
 private fun BookDetail(
+    s: AppStrings,
     e: Entry,
     onAuthor: (Author) -> Unit,
     onDownload: (Link) -> Unit
@@ -427,7 +452,7 @@ private fun BookDetail(
 
         if (e.summary.isNotBlank()) {
             Spacer(Modifier.height(16.dp))
-            Text("Опис", style = MaterialTheme.typography.titleMedium)
+            Text(s.description, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(e.summary, style = MaterialTheme.typography.bodyMedium)
         }
@@ -436,6 +461,7 @@ private fun BookDetail(
 
 @Composable
 private fun CatalogDialog(
+    s: AppStrings,
     initial: Catalog?,
     onDismiss: () -> Unit,
     onSave: (String, String, String, String) -> Unit
@@ -446,78 +472,82 @@ private fun CatalogDialog(
     var pass by remember { mutableStateOf(initial?.pass ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Додати каталог" else "Редагувати каталог") },
+        title = { Text(if (initial == null) s.addCatalogTitle else s.editCatalogTitle) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    label = { Text("Назва") }
+                    label = { Text(s.name) }
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
                     singleLine = true,
-                    label = { Text("OPDS-адреса") }
+                    label = { Text(s.opdsAddress) }
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = user,
                     onValueChange = { user = it },
                     singleLine = true,
-                    label = { Text("Логін (необов'язково)") }
+                    label = { Text(s.loginOptional) }
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = pass,
                     onValueChange = { pass = it },
                     singleLine = true,
-                    label = { Text("Пароль (необов'язково)") },
+                    label = { Text(s.passwordOptional) },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                 )
                 if (initial == null) {
                     Text(
-                        "Логін і пароль потрібні тільки для каталогів із авторизацією.",
+                        s.authNote,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(name, url, user, pass) }) { Text(if (initial == null) "Додати" else "Зберегти") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Скасувати") } }
+        confirmButton = { TextButton(onClick = { onSave(name, url, user, pass) }) { Text(if (initial == null) s.add else s.save) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } }
     )
 }
 
 @Composable
 private fun HomeList(
+    s: AppStrings,
+    lang: String,
     custom: List<Catalog>,
     onOpen: (Catalog) -> Unit,
     onDelete: (Catalog) -> Unit,
     onEdit: (Catalog) -> Unit
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
-        items(CATALOGS) { c -> CatalogRow(c, onOpen, null, null) }
+        items(CATALOGS) { c -> CatalogRow(s, c, lang, onOpen, null, null) }
         if (custom.isNotEmpty()) {
             item {
                 Text(
-                    "Мої каталоги",
+                    s.myCatalogs,
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp)
                 )
             }
-            items(custom) { c -> CatalogRow(c, onOpen, { onDelete(c) }, { onEdit(c) }) }
+            items(custom) { c -> CatalogRow(s, c, lang, onOpen, { onDelete(c) }, { onEdit(c) }) }
         }
     }
 }
 
 @Composable
 private fun CatalogRow(
+    s: AppStrings,
     c: Catalog,
+    lang: String,
     onOpen: (Catalog) -> Unit,
     onDelete: (() -> Unit)?,
     onEdit: (() -> Unit)? = null
@@ -532,7 +562,7 @@ private fun CatalogRow(
         Column(Modifier.weight(1f)) {
             Text(c.name, style = MaterialTheme.typography.titleMedium)
             Text(
-                c.note,
+                c.noteFor(lang),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -542,10 +572,10 @@ private fun CatalogRow(
             Text("🔒", modifier = Modifier.padding(end = 4.dp))
         }
         if (onEdit != null) {
-            TextButton(onClick = onEdit) { Text("Редагувати") }
+            TextButton(onClick = onEdit) { Text(s.edit) }
         }
         if (onDelete != null) {
-            TextButton(onClick = onDelete) { Text("Видалити") }
+            TextButton(onClick = onDelete) { Text(s.delete) }
         }
     }
     HorizontalDivider()
