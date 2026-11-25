@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private fun formatTime(millis: Long): String =
@@ -49,6 +51,7 @@ fun SubscriptionsScreen(
     onOpen: (String, Set<String>) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var subs by remember { mutableStateOf(SubscriptionsStore.load(context)) }
     var checking by remember { mutableStateOf(false) }
 
@@ -98,7 +101,7 @@ fun SubscriptionsScreen(
                     if (checking) {
                         CircularProgressIndicator(modifier = Modifier.padding(12.dp))
                     } else {
-                        TextButton(onClick = { checkAll() }) { Text(s.checkNow) }
+                        TextButton(onClick = { scope.launch { checkAll() } }) { Text(s.checkNow) }
                     }
                 }
             )
