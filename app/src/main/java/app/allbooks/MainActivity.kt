@@ -1,14 +1,20 @@
 package app.allbooks
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +69,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -226,6 +233,46 @@ fun CatalogScreen() {
     var folderSetupDismissed by remember { mutableStateOf(false) }
     var folderDraft by remember { mutableStateOf(settings.downloadFolder) }
 
+    // Дозвіл на запис файлів (Android 12 і старіше; на 13+ його вже нема —
+    // доступ дає вибір папки через файловий менеджер). Питаємо раз при запуску.
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT <= 32 &&
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+    }
+
+    // Вибір папки через файловий менеджер (SAF) при першому запуску.
+    val firstRunFolderPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                // дозвіл не зберігся — папка все одно спробує працювати
+            }
+            val updated = settings.copy(
+                downloadFolder = Downloads.safDisplayName(uri.toString()),
+                folderChosen = true,
+                safFolderUri = uri.toString()
+            )
+            settings = updated
+            SettingsStore.save(context, updated)
+            folderSetupDismissed = true
+        }
+    }
+
     // Стартова сторінка: відкрити вибраний каталог одразу при запуску.
     LaunchedEffect(settings.startCatalog) {
         if (!startOpened && history.isEmpty()) {
@@ -353,6 +400,10 @@ fun CatalogScreen() {
                         placeholder = { Text("BookMriya") },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { firstRunFolderPicker.launch(null) }) {
+                        Text(s.chooseFolder)
+                    }
                 }
             },
             confirmButton = {
@@ -496,7 +547,7 @@ fun CatalogScreen() {
                         }
                     },
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
-                    onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder) }
+                    onDownload = { link -> Downloads.start(context, sel, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder, settings, settings.safFolderUri) }
                 )
                 current == null -> HomeList(
                     s = s,
@@ -544,7 +595,7 @@ fun CatalogScreen() {
                                 e = e,
                                 isNew = newIds.contains(e.id),
                                 onBook = { selected = e },
-                                onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder) },
+                                onDownload = { link -> Downloads.start(context, e, link, s, currentCatalog?.user, currentCatalog?.pass, settings.downloadFolder, settings, settings.safFolderUri) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
                         }
