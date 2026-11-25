@@ -4,10 +4,9 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -67,7 +66,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.ImeAction
@@ -228,7 +226,6 @@ fun CatalogScreen() {
     var custom by remember { mutableStateOf(CustomStore.load(context)) }
     var showAdd by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Entry?>(null) }
-    var webUrl by remember { mutableStateOf<String?>(null) }
     var startOpened by remember { mutableStateOf(false) }
     var folderSetupDismissed by remember { mutableStateOf(false) }
     var folderDraft by remember { mutableStateOf(settings.downloadFolder) }
@@ -352,11 +349,6 @@ fun CatalogScreen() {
     }
     if (showDownloads) {
         DownloadsScreen(s = s, onBack = { showDownloads = false })
-        return
-    }
-    BackHandler(enabled = webUrl != null) { webUrl = null }
-    if (webUrl != null) {
-        WebViewScreen(s = s, url = webUrl!!, onBack = { webUrl = null })
         return
     }
     BackHandler(enabled = selected != null) {
@@ -535,7 +527,15 @@ fun CatalogScreen() {
                         selected = null
                         history.add(listOf(url))
                     },
-                    onOpenSite = { url -> webUrl = url },
+                    onOpenSite = { url ->
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            )
+                        } catch (e: Exception) {
+                            Toast.makeText(context, e.message ?: "?", Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     onToggleAuthor = { a ->
                         val target = authorTarget(a, sel, f?.searchUrl)
                         if (target != null) {
@@ -619,32 +619,6 @@ fun CatalogScreen() {
                 }
             }
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun WebViewScreen(s: AppStrings, url: String, onBack: () -> Unit) {
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text(url, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text(s.back) }
-                }
-            )
-        }
-    ) { padding ->
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    webViewClient = WebViewClient()
-                    settings.javaScriptEnabled = true
-                    loadUrl(url)
-                }
-            },
-            modifier = Modifier.fillMaxSize().padding(padding)
-        )
     }
 }
 
