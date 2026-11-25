@@ -71,9 +71,9 @@ object Downloads {
                 )
                 .setDestinationInExternalPublicDir(
                     Environment.DIRECTORY_DOWNLOADS,
-                    "AllBooks/$name"
+                    "BookMriya/$name"
                 )
-                .addRequestHeader("User-Agent", "AllBooks/2.0 (Android)")
+                .addRequestHeader("User-Agent", "BookMriya/2.0 (Android)")
             if (!user.isNullOrBlank()) {
                 req.addRequestHeader("Authorization", Credentials.basic(user, pass ?: ""))
             }
