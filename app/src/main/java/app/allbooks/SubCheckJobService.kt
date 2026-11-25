@@ -46,17 +46,26 @@ object SubCheckScheduler {
     private const val JOB_ID = 1001
 
     fun schedule(context: Context) {
-        val service = ComponentName(context, SubCheckJobService::class.java)
-        val job = JobInfo.Builder(JOB_ID, service)
-            .setPeriodic(TimeUnit.DAYS.toMillis(1))
-            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-            .build()
-        val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
-        scheduler.schedule(job)
+        try {
+            val service = ComponentName(context, SubCheckJobService::class.java)
+            val job = JobInfo.Builder(JOB_ID, service)
+                .setPeriodic(TimeUnit.DAYS.toMillis(1))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .build()
+            val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+            scheduler.schedule(job)
+        } catch (e: Exception) {
+            // Планування ніколи не повинно роняти запуск застосунку.
+            AppLog.d("SubCheck schedule failed: ${e.message}")
+        }
     }
 
     fun cancel(context: Context) {
-        val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
-        scheduler.cancel(JOB_ID)
+        try {
+            val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+            scheduler.cancel(JOB_ID)
+        } catch (e: Exception) {
+            AppLog.d("SubCheck cancel failed: ${e.message}")
+        }
     }
 }
