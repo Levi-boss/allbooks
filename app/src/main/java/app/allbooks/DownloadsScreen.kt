@@ -119,6 +119,12 @@ fun DownloadsScreen(s: AppStrings, onBack: () -> Unit) {
                                     Text(s.open)
                                 }
                             }
+                            if (item.isFailed && item.canRetry) {
+                                Button(onClick = {
+                                    Downloads.retry(context, item.id, s)
+                                    items = Downloads.list(context, s)
+                                }) { Text(s.retry) }
+                            }
                             if (item.isActive) {
                                 OutlinedButton(onClick = {
                                     Downloads.remove(context, item.id)
