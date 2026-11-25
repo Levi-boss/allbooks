@@ -26,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -75,33 +77,22 @@ private data class Catalog(
     val pass: String = ""
 )
 
+// Тільки перевірені 25.11.2026 каталоги. Видалено: Gutenberg — весь сайт дає 503,
+// ManyBooks — 403, OAPEN — OPDS-адреса дає 404.
 private val CATALOGS = listOf(
-    Catalog(
-        "Project Gutenberg",
-        "Публічне надбання, понад 70 000 книг",
-        listOf(
-            "https://www.gutenberg.org/ebooks/search.opds/",
-            "https://m.gutenberg.org/ebooks.opds/"
-        )
-    ),
     Catalog(
         "Flibusta",
         "Російськомовна та українська бібліотека (http)",
         listOf("http://flibusta.is/opds")
     ),
     Catalog(
-        "ManyBooks",
-        "Безкоштовні книги (адресу ще не перевірено)",
-        listOf("https://manybooks.net/opds/index.php")
-    ),
-    Catalog(
-        "OAPEN",
-        "Відкриті наукові книги (адресу ще не перевірено)",
-        listOf("https://library.oapen.org/opds")
+        "CoolLib",
+        "Російськомовна та українська бібліотека",
+        listOf("https://coollib.com/opds")
     ),
     Catalog(
         "unglue.it",
-        "Книги під вільними ліцензіями (адресу ще не перевірено)",
+        "Книги під вільними ліцензіями",
         listOf("https://unglue.it/api/opds/")
     )
 )
@@ -185,6 +176,7 @@ fun CatalogScreen() {
     var showSettings by remember { mutableStateOf(false) }
     var showDownloads by remember { mutableStateOf(false) }
     var editingCatalog by remember { mutableStateOf<Catalog?>(null) }
+    var showMenu by remember { mutableStateOf(false) }
     var currentCatalog by remember { mutableStateOf<Catalog?>(null) }
     val history = remember { mutableStateListOf<List<String>>() }
     val current = history.lastOrNull()
@@ -278,9 +270,24 @@ fun CatalogScreen() {
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     if (current == null && sel == null) {
-                        TextButton(onClick = { showDownloads = true }) { Text("Завантаження") }
-                        TextButton(onClick = { showSettings = true }) { Text("Налаштування") }
-                        TextButton(onClick = { showAdd = true }) { Text("+ Додати") }
+                        TextButton(onClick = { showMenu = true }) { Text("⋮") }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Завантаження") },
+                                onClick = { showMenu = false; showDownloads = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Налаштування") },
+                                onClick = { showMenu = false; showSettings = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("+ Додати каталог") },
+                                onClick = { showMenu = false; showAdd = true }
+                            )
+                        }
                     }
                 }
             )
