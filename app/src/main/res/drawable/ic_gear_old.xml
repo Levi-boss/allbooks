@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Старовинна шестерня для меню BookMriya -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#2A1A10"
+        android:strokeColor="#D8B45A"
+        android:strokeWidth="4"
+        android:strokeLineJoin="round"
+        android:pathData="M89.9,45.0 L99.6,47.6 L99.6,60.4 L89.9,63.0 L85.7,73.1 L90.7,81.7 L81.7,90.7 L73.1,85.7 L63.0,89.9 L60.4,99.6 L47.6,99.6 L45.0,89.9 L34.9,85.7 L26.3,90.7 L17.3,81.7 L22.3,73.1 L18.1,63.0 L8.4,60.4 L8.4,47.6 L18.1,45.0 L22.3,34.9 L17.3,26.3 L26.3,17.3 L34.9,22.3 L45.0,18.1 L47.6,8.4 L60.4,8.4 L63.0,18.1 L73.1,22.3 L81.7,17.3 L90.7,26.3 L85.7,34.9z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D8B45A"
+        android:strokeWidth="3"
+        android:pathData="M54,29 a25,25 0 1,0 0.1,0z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#D8B45A"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M61.1,61.1 L71.7,71.7 M46.9,61.1 L36.3,71.7 M46.9,46.9 L36.3,36.3 M61.1,46.9 L71.7,36.3" />
+    <path
+        android:fillColor="#D8B45A"
+        android:pathData="M54,46 a8,8 0 1,0 0.1,0z" />
+<path android:fillColor="#D8B45A" android:pathData="M85.0,51.5 a2.5,2.5 0 1,0 0.1,0z" />
+<path android:fillColor="#D8B45A" android:pathData="M54.0,82.5 a2.5,2.5 0 1,0 0.1,0z" />
+<path android:fillColor="#D8B45A" android:pathData="M23.0,51.5 a2.5,2.5 0 1,0 0.1,0z" />
+<path android:fillColor="#D8B45A" android:pathData="M54.0,20.5 a2.5,2.5 0 1,0 0.1,0z" />
+</vector>
