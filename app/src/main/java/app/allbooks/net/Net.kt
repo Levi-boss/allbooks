@@ -105,7 +105,12 @@ object Net {
                 }
                 val req = reqBuilder.build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                    if (!resp.isSuccessful) {
+                        // Діагностика 401: хто саме просить пароль (заголовок
+                        // WWW-Authenticate називає сервер) і яка адреса впала.
+                        val challenge = resp.header("WWW-Authenticate")?.let { " [$it]" } ?: ""
+                        throw IOException("HTTP ${resp.code}$challenge: $u")
+                    }
                     val bytes = resp.body?.bytes() ?: ByteArray(0)
                     return FetchResult(resp.request.url.toString(), bytes)
                 }
