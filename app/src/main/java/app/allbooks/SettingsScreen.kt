@@ -55,6 +55,7 @@ fun SettingsScreen(
     var user by remember { mutableStateOf(settings.proxyUser) }
     var pass by remember { mutableStateOf(settings.proxyPass) }
     var useDoh by remember { mutableStateOf(settings.useDoh) }
+    var theme by remember { mutableStateOf(settings.theme) }
     var startCatalog by remember { mutableStateOf(settings.startCatalog) }
     var folder by remember { mutableStateOf(settings.downloadFolder) }
     var safFolderUri by remember { mutableStateOf(settings.safFolderUri) }
@@ -70,7 +71,8 @@ fun SettingsScreen(
         startCatalog = startCatalog,
         downloadFolder = folder.trim().ifEmpty { "BookMriya" },
         folderChosen = true,
-        safFolderUri = safFolderUri
+        safFolderUri = safFolderUri,
+        theme = theme
     )
 
     fun save() {
@@ -144,6 +146,26 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp)
             )
+
+            Spacer(Modifier.height(24.dp))
+            Text(s.themeTitle, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            for ((value, label) in listOf(
+                "system" to s.themeSystem,
+                "light" to s.themeLight,
+                "dark" to s.themeDark
+            )) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { theme = value }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = theme == value, onClick = { theme = value })
+                    Text(label, modifier = Modifier.padding(start = 8.dp))
+                }
+            }
 
             Spacer(Modifier.height(24.dp))
             Text(s.startPage, style = MaterialTheme.typography.titleMedium)
