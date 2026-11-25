@@ -110,7 +110,10 @@ data class AppStrings(
     val deleteBookText: String,
     val mb: String,
     val searchAll: String,
-    val noSearchResults: String
+    val noSearchResults: String,
+    val notifyNewBooksTitle: String,
+    val notifyNewBooksDesc: String,
+    val notifyTitle: String
 )
 
 object AppLanguages {
@@ -239,7 +242,10 @@ object AppLanguages {
         deleteBookText = "The file will be deleted from the folder.",
         mb = "MB",
         searchAll = "Search all catalogs",
-        noSearchResults = "Nothing found."
+        noSearchResults = "Nothing found.",
+        notifyNewBooksTitle = "New book notifications",
+        notifyNewBooksDesc = "Check subscriptions once a day and notify about new books.",
+        notifyTitle = "New books"
     )
 
     val uk = AppStrings(
@@ -345,7 +351,10 @@ object AppLanguages {
         deleteBookText = "Файл буде видалено з папки.",
         mb = "МБ",
         searchAll = "Пошук по всіх каталогах",
-        noSearchResults = "Нічого не знайдено."
+        noSearchResults = "Нічого не знайдено.",
+        notifyNewBooksTitle = "Сповіщення про нові книги",
+        notifyNewBooksDesc = "Перевіряти підписки раз на день і сповіщати про нові книги.",
+        notifyTitle = "Нові книги"
     )
 
     val ru = AppStrings(
@@ -451,6 +460,9 @@ object AppLanguages {
         deleteBookText = "Файл будет удалён из папки.",
         mb = "МБ",
         searchAll = "Поиск по всем каталогам",
-        noSearchResults = "Ничего не найдено."
+        noSearchResults = "Ничего не найдено.",
+        notifyNewBooksTitle = "Уведомления о новых книгах",
+        notifyNewBooksDesc = "Проверять подписки раз в день и сообщать о новых книгах.",
+        notifyTitle = "Новые книги"
     )
 }
