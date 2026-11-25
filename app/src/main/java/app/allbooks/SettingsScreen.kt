@@ -79,6 +79,12 @@ fun SettingsScreen(
         onSettingsChange(buildSettings())
     }
 
+    // Тему застосовуємо одразу, як і мову, — без кнопки «Зберегти».
+    fun selectTheme(value: String) {
+        theme = value
+        onSettingsChange(buildSettings().copy(theme = value))
+    }
+
     // Вибір папки через файловий менеджер (SAF): система дає застосунку
     // постійний доступ саме до вибраної папки, без дозволу на всю пам'ять.
     val folderPicker = rememberLauncherForActivityResult(
@@ -158,11 +164,11 @@ fun SettingsScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { theme = value }
+                        .clickable { selectTheme(value) }
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RadioButton(selected = theme == value, onClick = { theme = value })
+                    RadioButton(selected = theme == value, onClick = { selectTheme(value) })
                     Text(label, modifier = Modifier.padding(start = 8.dp))
                 }
             }
