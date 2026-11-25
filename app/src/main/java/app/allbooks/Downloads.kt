@@ -17,7 +17,8 @@ data class DownloadItem(
     val fileName: String,
     val status: Int,
     val downloaded: Long,
-    val total: Long
+    val total: Long,
+    val canRetry: Boolean = false
 ) {
     val progress: Float get() = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else 0f
     val percent: Int get() = (progress * 100).toInt()
@@ -40,6 +41,8 @@ data class DownloadItem(
 object Downloads {
     private const val PREFS = "allbooks_downloads"
     private const val KEY = "ids"
+    // Метадані задачі для повтору: url, назва, формат, папка, логін, пароль (\u0001 — роздільник).
+    private const val META_PREFIX = "meta_"
 
     private fun trackedIds(c: Context): List<Long> {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
@@ -51,27 +54,68 @@ object Downloads {
             .putString(KEY, ids.joinToString("\n")).apply()
     }
 
+    private fun saveMeta(c: Context, id: Long, meta: String) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(META_PREFIX + id, meta).apply()
+    }
+
+    private fun readMeta(c: Context, id: Long): List<String>? {
+        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(META_PREFIX + id, null) ?: return null
+        return raw.split('\u0001')
+    }
+
+    private fun clearMeta(c: Context, id: Long) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(META_PREFIX + id).apply()
+    }
+
     fun extension(link: Link): String {
         val t = link.type.lowercase()
         return if (t.contains("fb2") && t.contains("zip")) "fb2.zip" else link.format
     }
 
-    fun start(context: Context, entry: Entry, link: Link, s: AppStrings, user: String? = null, pass: String? = null) {
+    fun start(context: Context, entry: Entry, link: Link, s: AppStrings, user: String? = null, pass: String? = null, folder: String = "BookMriya") {
         val safe = entry.title
             .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
             .trim()
             .take(80)
             .ifEmpty { "book" }
         val name = "$safe.${extension(link)}"
+        enqueue(context, link.href, entry.title, name, folder, user, pass, s)
+    }
+
+    /** Повторна спроба невдалого завантаження за збереженими метаданими. */
+    fun retry(context: Context, id: Long, s: AppStrings) {
+        val meta = readMeta(context, id)
+        if (meta == null || meta.size < 4) {
+            Toast.makeText(context, s.openFailed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val url = meta[0]
+        val title = meta[1]
+        val name = meta[2]
+        val folder = meta[3]
+        val user = meta.getOrNull(4)?.ifEmpty { null }
+        val pass = meta.getOrNull(5)?.ifEmpty { null }
+        remove(context, id)
+        enqueue(context, url, title, name, folder, user, pass, s)
+    }
+
+    private fun enqueue(context: Context, url: String, title: String, name: String, folder: String, user: String?, pass: String?, s: AppStrings) {
+        val cleanFolder = folder
+            .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
+            .trim()
+            .ifEmpty { "BookMriya" }
         try {
-            val req = DownloadManager.Request(Uri.parse(link.href))
-                .setTitle(entry.title)
+            val req = DownloadManager.Request(Uri.parse(url))
+                .setTitle(title)
                 .setNotificationVisibility(
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
                 )
                 .setDestinationInExternalPublicDir(
                     Environment.DIRECTORY_DOWNLOADS,
-                    "BookMriya/$name"
+                    "$cleanFolder/$name"
                 )
                 .addRequestHeader("User-Agent", "BookMriya/2.0 (Android)")
             if (!user.isNullOrBlank()) {
@@ -80,6 +124,11 @@ object Downloads {
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val id = dm.enqueue(req)
             saveTrackedIds(context, trackedIds(context) + id)
+            saveMeta(
+                context, id,
+                listOf(url, title, name, cleanFolder, user ?: "", pass ?: "")
+                    .joinToString("\u0001")
+            )
             Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(context, "${s.errorTitle}: ${e.message}", Toast.LENGTH_LONG).show()
@@ -112,7 +161,7 @@ object Downloads {
                 val total = if (totalCol >= 0) it.getLong(totalCol) else -1L
                 val uri = if (uriCol >= 0) it.getString(uriCol) ?: "" else ""
                 val fileName = uri.substringAfterLast('/').ifBlank { title }
-                out.add(DownloadItem(id, title, fileName, status, downloaded, total))
+                out.add(DownloadItem(id, title, fileName, status, downloaded, total, readMeta(context, id) != null))
             }
         }
         // Старіші — внизу, нові — вгорі (за id, він росте)
@@ -127,6 +176,7 @@ object Downloads {
             // ігноруємо — головне прибрати зі списку
         }
         saveTrackedIds(context, trackedIds(context) - id)
+        clearMeta(context, id)
     }
 
     fun open(context: Context, id: Long, s: AppStrings) {
