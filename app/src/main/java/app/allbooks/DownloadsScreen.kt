@@ -34,27 +34,27 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DownloadsScreen(onBack: () -> Unit) {
+fun DownloadsScreen(s: AppStrings, onBack: () -> Unit) {
     val context = LocalContext.current
-    var items by remember { mutableStateOf(Downloads.list(context)) }
+    var items by remember { mutableStateOf(Downloads.list(context, s)) }
 
     // Оновлення прогресу, поки екран відкритий
     LaunchedEffect(Unit) {
         while (true) {
             delay(2000)
-            items = Downloads.list(context)
+            items = Downloads.list(context, s)
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Завантаження") },
+                title = { Text(s.downloads) },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("‹ Назад") }
+                    TextButton(onClick = onBack) { Text(s.back) }
                 },
                 actions = {
-                    TextButton(onClick = { items = Downloads.list(context) }) { Text("Оновити") }
+                    TextButton(onClick = { items = Downloads.list(context, s) }) { Text(s.refresh) }
                 }
             )
         }
@@ -67,10 +67,10 @@ fun DownloadsScreen(onBack: () -> Unit) {
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Поки що нічого не завантажено.")
+                Text(s.downloadsEmpty)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Відкрийте книгу і натисніть кнопку формату — EPUB, FB2 тощо.",
+                    s.downloadsEmptyHint,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -106,29 +106,29 @@ fun DownloadsScreen(onBack: () -> Unit) {
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "${item.statusText} — ${item.percent}% (${item.downloaded / 1024} / ${item.total / 1024} КБ)",
+                                "${item.statusText(s)} — ${item.percent}% (${item.downloaded / 1024} / ${item.total / 1024} ${s.kb})",
                                 style = MaterialTheme.typography.bodySmall
                             )
                         } else {
-                            Text(item.statusText, style = MaterialTheme.typography.bodySmall)
+                            Text(item.statusText(s), style = MaterialTheme.typography.bodySmall)
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (item.isSuccessful) {
-                                Button(onClick = { Downloads.open(context, item.id) }) {
-                                    Text("Відкрити")
+                                Button(onClick = { Downloads.open(context, item.id, s) }) {
+                                    Text(s.open)
                                 }
                             }
                             if (item.isActive) {
                                 OutlinedButton(onClick = {
                                     Downloads.remove(context, item.id)
-                                    items = Downloads.list(context)
-                                }) { Text("Скасувати") }
+                                    items = Downloads.list(context, s)
+                                }) { Text(s.cancelDownload) }
                             } else {
                                 OutlinedButton(onClick = {
                                     Downloads.remove(context, item.id)
-                                    items = Downloads.list(context)
-                                }) { Text("Прибрати зі списку") }
+                                    items = Downloads.list(context, s)
+                                }) { Text(s.removeFromList) }
                             }
                         }
                     }
