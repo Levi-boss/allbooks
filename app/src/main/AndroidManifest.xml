@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Потрібен для JobScheduler: перевірка підписок має обмеження
+         «тільки з мережею» (NETWORK_TYPE_ANY), без цього дозволу
+         schedule() кидає SecurityException і застосунок падає при запуску. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Доступ до файлів на Android 12 і старіше; на Android 13+ доступ до
          папок дає вибір через файловий менеджер (SAF), дозвіл не потрібен. -->
     <uses-permission
