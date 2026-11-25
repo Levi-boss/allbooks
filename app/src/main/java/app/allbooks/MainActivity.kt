@@ -2,6 +2,7 @@ package app.allbooks
 
 import android.content.Context
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.Net
 import app.allbooks.net.NetSettings
+import app.allbooks.opds.Author
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Feed
 import app.allbooks.opds.Link
@@ -118,6 +122,32 @@ private object CustomStore {
     }
 }
 
+private fun searchUrlFor(template: String, term: String): String {
+    val enc = URLEncoder.encode(term, "UTF-8")
+    return template.replace("{searchTerms}", enc).replace("%7BsearchTerms%7D", enc)
+}
+
+/** Шукає адресу сторінки з книгами автора: пов'язане посилання, uri автора або пошук. */
+private fun authorTarget(a: Author, e: Entry, searchTemplate: String?): String? {
+    val nameLc = a.name.lowercase()
+    val atomLinks = e.links.filter { it.type.contains("atom") }
+
+    atomLinks.firstOrNull { it.title.lowercase().contains(nameLc) }?.let { return it.href }
+
+    if (e.authors.size == 1) {
+        atomLinks.firstOrNull {
+            val t = it.title.lowercase()
+            t.contains("автор") || t.contains("author")
+        }?.let { return it.href }
+    }
+
+    val u = a.uri
+    if (u.startsWith("http") && (u.contains("opds") || u.contains("author"))) return u
+
+    if (searchTemplate != null) return searchUrlFor(searchTemplate, a.name)
+    return null
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -145,6 +175,7 @@ fun CatalogScreen() {
     var query by remember { mutableStateOf("") }
     var custom by remember { mutableStateOf(CustomStore.load(context)) }
     var showAdd by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Entry?>(null) }
 
     LaunchedEffect(current, reloadKey) {
         val urls = current ?: return@LaunchedEffect
@@ -168,6 +199,9 @@ fun CatalogScreen() {
     BackHandler(enabled = history.isNotEmpty()) {
         history.removeAt(history.lastIndex)
     }
+    BackHandler(enabled = selected != null) {
+        selected = null
+    }
 
     if (showAdd) {
         AddCatalogDialog(
@@ -187,14 +221,19 @@ fun CatalogScreen() {
         )
     }
 
-    val title = if (current == null) "All Books" else (feed?.title ?: "Завантаження…")
+    val sel = selected
+    val title = when {
+        sel != null -> sel.title
+        current == null -> "All Books"
+        else -> feed?.title ?: "Завантаження…"
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
-                    if (current == null) {
+                    if (current == null && sel == null) {
                         TextButton(onClick = { showAdd = true }) { Text("+ Додати") }
                     }
                 }
@@ -204,6 +243,23 @@ fun CatalogScreen() {
         Box(Modifier.fillMaxSize().padding(padding)) {
             val f = feed
             when {
+                sel != null -> BookDetail(
+                    e = sel,
+                    onAuthor = { a ->
+                        val target = authorTarget(a, sel, f?.searchUrl)
+                        if (target != null) {
+                            selected = null
+                            history.add(listOf(target))
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "Для цього каталогу перехід по автору недоступний",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    onDownload = { link -> Downloads.start(context, sel, link) }
+                )
                 current == null -> HomeList(
                     custom = custom,
                     onOpen = { c -> history.add(c.urls) },
@@ -235,11 +291,7 @@ fun CatalogScreen() {
                             keyboardActions = KeyboardActions(onSearch = {
                                 val q = query.trim()
                                 if (q.isNotEmpty()) {
-                                    val enc = URLEncoder.encode(q, "UTF-8")
-                                    val u = template
-                                        .replace("{searchTerms}", enc)
-                                        .replace("%7BsearchTerms%7D", enc)
-                                    history.add(listOf(u))
+                                    history.add(listOf(searchUrlFor(template, q)))
                                 }
                             })
                         )
@@ -248,6 +300,7 @@ fun CatalogScreen() {
                         items(f.entries) { e ->
                             EntryRow(
                                 e,
+                                onBook = { selected = e },
                                 onDownload = { link -> Downloads.start(context, e, link) },
                                 onOpen = { target -> history.add(listOf(target)) }
                             )
@@ -263,6 +316,66 @@ fun CatalogScreen() {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun BookDetail(
+    e: Entry,
+    onAuthor: (Author) -> Unit,
+    onDownload: (Link) -> Unit
+) {
+    val cover = e.links.firstOrNull { it.rel == "http://opds-spec.org/image" }?.href
+        ?: e.links.firstOrNull {
+            it.rel.contains("thumbnail") || it.rel.contains("image")
+        }?.href
+    val downloads = e.links.filter { it.isAcquisition }.distinctBy { it.format }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Row {
+            if (cover != null) {
+                AsyncImage(
+                    model = cover,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.width(130.dp).heightIn(max = 200.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(e.title, style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(8.dp))
+                e.authors.forEach { a ->
+                    TextButton(onClick = { onAuthor(a) }) {
+                        Text(a.name, style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+            }
+        }
+
+        if (downloads.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                downloads.forEach { l ->
+                    Button(
+                        onClick = { onDownload(l) },
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) { Text("⬇ " + l.format.uppercase()) }
+                }
+            }
+        }
+
+        if (e.summary.isNotBlank()) {
+            Spacer(Modifier.height(16.dp))
+            Text("Опис", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(e.summary, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -344,9 +457,18 @@ private fun CatalogRow(c: Catalog, onOpen: (Catalog) -> Unit, onDelete: (() -> U
 }
 
 @Composable
-fun EntryRow(e: Entry, onDownload: (Link) -> Unit, onOpen: (String) -> Unit) {
+fun EntryRow(
+    e: Entry,
+    onBook: () -> Unit,
+    onDownload: (Link) -> Unit,
+    onOpen: (String) -> Unit
+) {
     val nav = if (e.isBook) null else e.navigation
-    val clickMod = if (nav != null) Modifier.clickable { onOpen(nav.href) } else Modifier
+    val clickMod = when {
+        e.isBook -> Modifier.clickable { onBook() }
+        nav != null -> Modifier.clickable { onOpen(nav.href) }
+        else -> Modifier
+    }
     val cover = e.links.firstOrNull {
         it.rel.contains("thumbnail") || it.rel.contains("image")
     }?.href
@@ -370,7 +492,7 @@ fun EntryRow(e: Entry, onDownload: (Link) -> Unit, onOpen: (String) -> Unit) {
             Text(e.title, style = MaterialTheme.typography.titleMedium)
             if (e.authors.isNotEmpty()) {
                 Text(
-                    e.authors.joinToString(", "),
+                    e.authors.joinToString(", ") { it.name },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
