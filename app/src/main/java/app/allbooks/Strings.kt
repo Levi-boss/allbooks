@@ -108,7 +108,9 @@ data class AppStrings(
     val myBooksEmptyHint: String,
     val deleteBookTitle: String,
     val deleteBookText: String,
-    val mb: String
+    val mb: String,
+    val searchAll: String,
+    val noSearchResults: String
 )
 
 object AppLanguages {
@@ -235,7 +237,9 @@ object AppLanguages {
         myBooksEmptyHint = "Download a book from a catalog — it will appear here.",
         deleteBookTitle = "Delete this book?",
         deleteBookText = "The file will be deleted from the folder.",
-        mb = "MB"
+        mb = "MB",
+        searchAll = "Search all catalogs",
+        noSearchResults = "Nothing found."
     )
 
     val uk = AppStrings(
@@ -339,7 +343,9 @@ object AppLanguages {
         myBooksEmptyHint = "Завантажте книгу з каталогу — вона з'явиться тут.",
         deleteBookTitle = "Видалити цю книгу?",
         deleteBookText = "Файл буде видалено з папки.",
-        mb = "МБ"
+        mb = "МБ",
+        searchAll = "Пошук по всіх каталогах",
+        noSearchResults = "Нічого не знайдено."
     )
 
     val ru = AppStrings(
@@ -443,6 +449,8 @@ object AppLanguages {
         myBooksEmptyHint = "Скачайте книгу из каталога — она появится здесь.",
         deleteBookTitle = "Удалить эту книгу?",
         deleteBookText = "Файл будет удалён из папки.",
-        mb = "МБ"
+        mb = "МБ",
+        searchAll = "Поиск по всем каталогам",
+        noSearchResults = "Ничего не найдено."
     )
 }
