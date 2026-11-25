@@ -17,11 +17,18 @@ data class Entry(
     val title: String,
     val authors: List<Author>,
     val summary: String,
-    val links: List<Link>
+    val links: List<Link>,
+    val categories: List<String> = emptyList(),
+    val language: String = "",
+    val updated: String = ""
 ) {
     val isBook: Boolean get() = links.any { it.isAcquisition }
     val thumbnail: Link? get() = links.firstOrNull { it.isThumbnail }
     val navigation: Link? get() = links.firstOrNull { it.isNavigation }
+
+    /** Рік з дати оновлення запису (наприклад, 2024). */
+    val year: String? get() =
+        updated.take(4).takeIf { it.length == 4 && it.all { c -> c.isDigit() } }
 
     /** Посилання «Всі книги серії» (Flibusta/CoolLib: /opds/sequencebooks/…). */
     val seriesLink: Link? get() = links.firstOrNull {
