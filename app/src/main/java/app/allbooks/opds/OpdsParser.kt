@@ -46,6 +46,9 @@ object OpdsParser {
         var summary = ""
         val authors = mutableListOf<Author>()
         val links = mutableListOf<Link>()
+        val categories = mutableListOf<String>()
+        var language = ""
+        var updated = ""
 
         while (true) {
             val ev = p.next()
@@ -57,6 +60,13 @@ object OpdsParser {
                 "id" -> id = readText(p)
                 "title" -> title = readText(p)
                 "link" -> links.add(readLink(p, base))
+                "category" -> {
+                    val term = p.getAttributeValue(null, "term")?.trim() ?: ""
+                    if (term.isNotBlank()) categories.add(term)
+                    skip(p)
+                }
+                "dc:language" -> language = readText(p)
+                "updated" -> updated = readText(p)
                 "author" -> {
                     val a = readAuthor(p, base)
                     if (a != null) authors.add(a)
@@ -67,7 +77,7 @@ object OpdsParser {
                 }
             }
         }
-        return Entry(id, title, authors, summary, links)
+        return Entry(id, title, authors, summary, links, categories, language, updated)
     }
 
     private fun readAuthor(p: XmlPullParser, base: String): Author? {
