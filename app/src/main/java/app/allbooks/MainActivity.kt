@@ -10,9 +10,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -54,6 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -219,6 +223,8 @@ fun CatalogScreen() {
     var selected by remember { mutableStateOf<Entry?>(null) }
     var webUrl by remember { mutableStateOf<String?>(null) }
     var startOpened by remember { mutableStateOf(false) }
+    var folderSetupDismissed by remember { mutableStateOf(false) }
+    var folderDraft by remember { mutableStateOf(settings.downloadFolder) }
 
     // Стартова сторінка: відкрити вибраний каталог одразу при запуску.
     LaunchedEffect(settings.startCatalog) {
@@ -326,6 +332,40 @@ fun CatalogScreen() {
                     showAdd = false
                     editingCatalog = null
                 }
+            }
+        )
+    }
+
+    // Перший запуск: якщо папку завантажень ще не вибирали — запитати одразу.
+    if (!settings.folderChosen && !folderSetupDismissed) {
+        AlertDialog(
+            onDismissRequest = { folderSetupDismissed = true },
+            title = { Text(s.firstRunFolderTitle) },
+            text = {
+                Column {
+                    Text(s.firstRunFolderHint, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = folderDraft,
+                        onValueChange = { folderDraft = it },
+                        singleLine = true,
+                        label = { Text(s.downloadFolder) },
+                        placeholder = { Text("BookMriya") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = folderDraft.trim().ifEmpty { "BookMriya" }
+                    val updated = settings.copy(downloadFolder = chosen, folderChosen = true)
+                    settings = updated
+                    SettingsStore.save(context, updated)
+                    folderSetupDismissed = true
+                }) { Text(s.save) }
+            },
+            dismissButton = {
+                TextButton(onClick = { folderSetupDismissed = true }) { Text(s.later) }
             }
         )
     }
@@ -549,6 +589,7 @@ private fun WebViewScreen(s: AppStrings, url: String, onBack: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BookDetail(
     s: AppStrings,
@@ -648,12 +689,9 @@ private fun BookDetail(
 
         if (downloads.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
+            FlowRow {
                 downloads.forEach { l ->
-                    Button(
-                        onClick = { onDownload(l) },
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) { Text("⬇ " + l.format.uppercase()) }
+                    FormatChip(l.format) { onDownload(l) }
                 }
             }
         }
@@ -807,6 +845,35 @@ private fun CatalogRow(
     HorizontalDivider()
 }
 
+/** Кольорова плашка формату, як у Library: FB2 — червона, HTML — синя і т.д. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FormatChip(format: String, onClick: () -> Unit) {
+    val color = when (format.uppercase()) {
+        "FB2" -> Color(0xFFE53935)
+        "HTML" -> Color(0xFF1E88E5)
+        "TXT" -> Color(0xFF43A047)
+        "RTF" -> Color(0xFF9E9D24)
+        "EPUB" -> Color(0xFF8E24AA)
+        "MOBI" -> Color(0xFFD81B60)
+        else -> Color(0xFF757575)
+    }
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = color,
+            contentColor = Color.White
+        ),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+        modifier = Modifier
+            .height(32.dp)
+            .padding(end = 6.dp, bottom = 6.dp)
+    ) {
+        Text("⬇ " + format.uppercase(), style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EntryRow(
     s: AppStrings,
@@ -874,11 +941,9 @@ fun EntryRow(
             }
             if (e.isBook) {
                 val acquisitions = e.links.filter { it.isAcquisition }.distinctBy { it.format }
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                FlowRow {
                     acquisitions.forEach { l ->
-                        TextButton(onClick = { onDownload(l) }) {
-                            Text("⬇ " + l.format.uppercase())
-                        }
+                        FormatChip(l.format) { onDownload(l) }
                     }
                 }
             }
