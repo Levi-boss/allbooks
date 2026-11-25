@@ -4,7 +4,8 @@ data class Feed(
     val title: String,
     val entries: List<Entry>,
     val nextUrl: String?,
-    val searchUrl: String?
+    val searchUrl: String?,
+    val icon: String? = null
 )
 
 data class Author(
