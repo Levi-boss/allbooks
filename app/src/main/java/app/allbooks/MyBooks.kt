@@ -2,7 +2,9 @@ package app.allbooks
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.widget.Toast
@@ -175,32 +177,79 @@ object MyBooks {
         return out
     }
 
-    /** Відкрити зовнішньою читалкою (той самий механізм, що на екрані Завантаження). */
-    fun open(context: Context, book: MyBook, s: AppStrings) {
-        if (book.dmId != null) {
-            Downloads.open(context, book.dmId, s)
-            return
-        }
+    /** Відкрити зовнішньою читалкою. Без пакета — системний вибір;
+     * з пакетом — одразу в ньому (вибір запам'ятовується при першому відкритті). */
+    fun open(context: Context, book: MyBook, s: AppStrings, packageName: String? = null) {
         try {
-            val uri = when {
-                book.file != null -> FileProvider.getUriForFile(context, PROVIDER_AUTHORITY, book.file)
-                book.safUri != null -> book.safUri
-                else -> null
-            } ?: run {
+            val intent = openIntent(context, book) ?: run {
                 Toast.makeText(context, s.fileNotReady, Toast.LENGTH_SHORT).show()
                 return
             }
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeFor(book.fileName))
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (packageName != null) {
+                intent.setPackage(packageName)
+                context.startActivity(intent)
+            } else {
+                val chooser = Intent.createChooser(intent, s.openBook)
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
             }
-            val chooser = Intent.createChooser(intent, s.openBook)
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(chooser)
         } catch (e: Exception) {
             AppLog.d("MyBooks open failed: ${book.fileName}: ${e.message}")
             Toast.makeText(context, "${s.openFailed}: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Читалка, вибрана користувачем для «Відкрити» (запам'ятовується при першому виборі). */
+    data class ReaderApp(val label: String, val packageName: String)
+
+    private const val READER_PREFS = "allbooks_open_with"
+    private const val KEY_READER_PKG = "package"
+
+    fun savedReaderPackage(context: Context): String? =
+        context.getSharedPreferences(READER_PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_READER_PKG, null)?.takeIf { it.isNotBlank() }
+
+    fun saveReaderPackage(context: Context, packageName: String) {
+        context.getSharedPreferences(READER_PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_READER_PKG, packageName).apply()
+    }
+
+    /** Чи може застосунок з пакета ще відкрити цю книгу (не видалено). */
+    fun canOpenWith(context: Context, book: MyBook, packageName: String): Boolean =
+        readerCandidates(context, book).any { it.packageName == packageName }
+
+    /** Застосунки, що вміють відкрити цю книгу (без нашого власного). */
+    fun readerCandidates(context: Context, book: MyBook): List<ReaderApp> {
+        val intent = openIntent(context, book) ?: return emptyList()
+        val pm = context.packageManager
+        val infos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(intent, 0)
+        }
+        return infos
+            .filter { it.activityInfo.packageName != context.packageName }
+            .map { ReaderApp(it.loadLabel(pm).toString(), it.activityInfo.packageName) }
+            .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+    }
+
+    private fun openIntent(context: Context, book: MyBook): Intent? {
+        val uri = when {
+            book.file != null -> try {
+                FileProvider.getUriForFile(context, PROVIDER_AUTHORITY, book.file)
+            } catch (e: Exception) {
+                null
+            }
+            book.safUri != null -> book.safUri
+            book.dmId != null -> Downloads.uriFor(context, book.dmId)
+            else -> null
+        } ?: return null
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeFor(book.fileName))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
 
