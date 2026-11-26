@@ -5,6 +5,9 @@ import android.content.Context
 import android.net.Uri
 import android.util.Xml
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,10 +29,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +50,7 @@ import app.allbooks.net.NetSettings
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Link
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 import java.io.ByteArrayInputStream
@@ -498,6 +510,15 @@ object ReaderStore {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .remove("last_file").remove("last_name").apply()
     }
+
+    /** Нічний режим читалки: чорний фон, тьмяний текст. */
+    fun night(c: Context): Boolean =
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("night", false)
+
+    fun saveNight(c: Context, on: Boolean) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("night", on).apply()
+    }
 }
 
 /** Екран читання: заголовки й абзаци списком, A- / A+ — розмір шрифту. */
@@ -508,6 +529,9 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
     var blocks by remember { mutableStateOf<List<Block>?>(null) }
     var failed by remember { mutableStateOf(false) }
     var fontSize by remember { mutableStateOf(ReaderStore.fontSize(context)) }
+    var night by remember { mutableStateOf(ReaderStore.night(context)) }
+    val focusRequester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
     val savedPos = remember(book) { ReaderStore.position(context, book.fileName) }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = savedPos.first,
@@ -520,6 +544,18 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
             listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset
         )
     }
+
+    // Гучність гортає текст: вниз — на сторінку вперед, вгору — назад.
+    fun scrollPage(down: Boolean) {
+        val page = listState.layoutInfo.viewportSize.height * 0.9f
+        scope.launch {
+            listState.scroll(MutatePriority.Default) {
+                scrollBy(if (down) page else -page)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     LaunchedEffect(book) {
         val parsed = Reader.load(context, book)
@@ -538,6 +574,18 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
     DisposableEffect(Unit) { onDispose { savePosition() } }
 
     Scaffold(
+        modifier = Modifier
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.VolumeDown -> { scrollPage(down = true); true }
+                    Key.VolumeUp -> { scrollPage(down = false); true }
+                    else -> false
+                }
+            },
+        containerColor = if (night) Color.Black else MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -548,6 +596,10 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
                 },
                 actions = {
                     TextButton(onClick = {
+                        night = !night
+                        ReaderStore.saveNight(context, night)
+                    }) { Text(if (night) "☀" else "☾") }
+                    TextButton(onClick = {
                         fontSize = (fontSize - 2f).coerceAtLeast(12f)
                         ReaderStore.saveFontSize(context, fontSize)
                     }) { Text("A−") }
@@ -557,7 +609,8 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
                     }) { Text("A+") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (dark) Color(0xFF121212) else Color.White
+                    containerColor = if (night) Color.Black
+                        else if (dark) Color(0xFF121212) else Color.White
                 )
             )
         }
@@ -566,7 +619,7 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
             failed -> Box(
                 Modifier.fillMaxSize().padding(padding).padding(24.dp),
                 contentAlignment = Alignment.Center
-            ) { Text(s.readFailed) }
+            ) { Text(s.readFailed, color = if (night) Color(0xFFB0B0B0) else Color.Unspecified) }
             blocks == null -> Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
@@ -585,12 +638,14 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = (fontSize + 4f).sp,
+                                color = if (night) Color(0xFFD0D0D0) else Color.Unspecified,
                                 modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
                             )
                             is Block.Para -> Text(
                                 block.text,
                                 fontSize = fontSize.sp,
                                 lineHeight = (fontSize + 8f).sp,
+                                color = if (night) Color(0xFFB0B0B0) else Color.Unspecified,
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
                         }
