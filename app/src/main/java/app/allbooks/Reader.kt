@@ -5,7 +5,9 @@ import android.content.Context
 import android.net.Uri
 import android.util.Xml
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.scrollBy
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -547,7 +548,11 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
     // Гучність гортає текст: вниз — на сторінку вперед, вгору — назад.
     fun scrollPage(down: Boolean) {
         val page = listState.layoutInfo.viewportSize.height * 0.9f
-        scope.launch { listState.scrollBy(if (down) page else -page) }
+        scope.launch {
+            listState.scroll(MutatePriority.Default) {
+                scrollBy(if (down) page else -page)
+            }
+        }
     }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
