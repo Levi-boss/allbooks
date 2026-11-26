@@ -1,5 +1,6 @@
 package app.allbooks
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -19,9 +21,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +33,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.NetSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,12 +46,23 @@ fun MyBooksScreen(
     onRead: (MyBook) -> Unit
 ) {
     val context = LocalContext.current
-    var books by remember { mutableStateOf(MyBooks.list(context, settings, s)) }
+    val scope = rememberCoroutineScope()
+    // Список вантажиться у фоні (Dispatchers.IO): MyBooks.list читає папку,
+    // питає DownloadManager і розшифровує метадані — на головному потоці
+    // це заморожувало екран на секунду-дві при кожному відкритті.
+    var books by remember { mutableStateOf<List<MyBook>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
     var toDelete by remember { mutableStateOf<MyBook?>(null) }
 
     fun reload() {
-        books = MyBooks.list(context, settings, s)
+        scope.launch {
+            loading = true
+            books = withContext(Dispatchers.IO) { MyBooks.list(context, settings, s) }
+            loading = false
+        }
     }
+
+    LaunchedEffect(Unit) { reload() }
 
     if (toDelete != null) {
         val book = toDelete!!
@@ -54,9 +72,11 @@ fun MyBooksScreen(
             text = { Text(book.displayName + "\n" + s.deleteBookText) },
             confirmButton = {
                 TextButton(onClick = {
-                    MyBooks.delete(context, book, s)
                     toDelete = null
-                    reload()
+                    scope.launch {
+                        withContext(Dispatchers.IO) { MyBooks.delete(context, book, s) }
+                        reload()
+                    }
                 }) { Text(s.delete) }
             },
             dismissButton = {
@@ -78,7 +98,16 @@ fun MyBooksScreen(
             )
         }
     ) { padding ->
-        if (books.isEmpty()) {
+        if (loading) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (books.isEmpty()) {
             Column(
                 Modifier
                     .fillMaxSize()

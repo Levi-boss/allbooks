@@ -92,6 +92,9 @@ object Downloads {
             .putString(META_PREFIX + id, safe.joinToString("\u0001")).apply()
     }
 
+    private fun hasMeta(c: Context, id: Long): Boolean =
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains(META_PREFIX + id)
+
     private fun readMeta(c: Context, id: Long): List<String>? {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(META_PREFIX + id, null) ?: return null
@@ -127,7 +130,7 @@ object Downloads {
             status = p[2].toIntOrNull() ?: DownloadManager.STATUS_FAILED,
             downloaded = p[3].toLongOrNull() ?: 0L,
             total = p[4].toLongOrNull() ?: -1L,
-            canRetry = readMeta(c, id) != null,
+            canRetry = hasMeta(c, id),
             safDocUri = p.getOrNull(5) ?: ""
         )
     }
@@ -587,7 +590,7 @@ object Downloads {
                     val total = if (totalCol >= 0) it.getLong(totalCol) else -1L
                     val uri = if (uriCol >= 0) it.getString(uriCol) ?: "" else ""
                     val fileName = uri.substringAfterLast('/').ifBlank { title }
-                    out.add(DownloadItem(id, title, fileName, status, downloaded, total, readMeta(context, id) != null))
+                    out.add(DownloadItem(id, title, fileName, status, downloaded, total, hasMeta(context, id)))
                 }
             }
         }
