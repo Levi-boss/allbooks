@@ -799,7 +799,8 @@ fun CatalogScreen() {
             val f = feed
             when {
                 sel != null -> {
-                val readBook = remember(sel) { Reader.findDownloaded(context, settings, s, sel) }
+                val downloadedBooks = remember(sel) { Reader.downloadedMap(context, settings, s) }
+                val readBook = remember(sel) { Reader.findDownloaded(sel, downloadedBooks) }
                 BookDetail(
                     s = s,
                     e = sel,
@@ -849,7 +850,10 @@ fun CatalogScreen() {
                     },
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
                     onDownload = { link -> Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri) },
-                    onRead = readBook?.let { rb -> { readingBook = rb } }
+                    onRead = readBook?.let { rb -> { readingBook = rb } },
+                    downloadedBooks = downloadedBooks,
+                    onOpenExternal = { book -> MyBooks.open(context, book, s) },
+                    onReadBook = { rb -> readingBook = rb }
                 )
             }
                 current == null -> Column(Modifier.fillMaxSize()) {
@@ -1042,7 +1046,10 @@ private fun BookDetail(
     onToggleSeries: () -> Unit,
     isSeriesSubscribed: Boolean,
     onDownload: (Link) -> Unit,
-    onRead: (() -> Unit)? = null
+    onRead: (() -> Unit)? = null,
+    downloadedBooks: Map<String, MyBook> = emptyMap(),
+    onOpenExternal: (MyBook) -> Unit = {},
+    onReadBook: (ReaderBook) -> Unit = {}
 ) {
     val cover = e.links.firstOrNull { it.rel == "http://opds-spec.org/image" }?.href
         ?: e.links.firstOrNull {
@@ -1054,6 +1061,7 @@ private fun BookDetail(
         .filterNot { it.trim().startsWith("Серия:", ignoreCase = true) }
         .joinToString("\n").trim()
     var showCover by remember { mutableStateOf(false) }
+    var downloadDialog by remember { mutableStateOf<Pair<Link, MyBook>?>(null) }
     val siteUrl = e.links.firstOrNull {
         it.rel == "alternate" && it.type.contains("html")
     }?.href
@@ -1069,6 +1077,38 @@ private fun BookDetail(
                     .clickable { showCover = false }
             )
         }
+    }
+
+    // Друге натискання на вже завантажену плашку: вибір, чим читати.
+    val dlg = downloadDialog
+    if (dlg != null) {
+        val (link, book) = dlg
+        AlertDialog(
+            onDismissRequest = { downloadDialog = null },
+            title = { Text(book.displayName, maxLines = 2) },
+            text = {
+                Column {
+                    if (Reader.supports(book.fileName)) {
+                        TextButton(onClick = {
+                            downloadDialog = null
+                            onReadBook(ReaderBook.fromMyBook(book))
+                        }) { Text(s.read) }
+                    }
+                    TextButton(onClick = {
+                        downloadDialog = null
+                        onOpenExternal(book)
+                    }) { Text(s.openWith) }
+                    TextButton(onClick = {
+                        downloadDialog = null
+                        onDownload(link)
+                    }) { Text(s.downloadAgain) }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { downloadDialog = null }) { Text(s.cancel) }
+            }
+        )
     }
 
     Column(
@@ -1132,7 +1172,11 @@ private fun BookDetail(
             Spacer(Modifier.height(16.dp))
             FlowRow {
                 downloads.forEach { l ->
-                    FormatChip(l.format) { onDownload(l) }
+                    val book = downloadedBooks[Reader.expectedFileName(e, l)]
+                    FormatChip(l.format, downloaded = book != null) {
+                        if (book != null) downloadDialog = l to book
+                        else onDownload(l)
+                    }
                 }
             }
         }
@@ -1421,8 +1465,8 @@ private fun CatalogRow(
 /** Кольорова плашка формату, як у Library: FB2 — червона, HTML — синя і т.д. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FormatChip(format: String, onClick: () -> Unit) {
-    val color = when (format.uppercase()) {
+private fun FormatChip(format: String, downloaded: Boolean = false, onClick: () -> Unit) {
+    val color = if (downloaded) Color(0xFF9E9E9E) else when (format.uppercase()) {
         "FB2" -> Color(0xFFE53935)
         "HTML" -> Color(0xFF1E88E5)
         "TXT" -> Color(0xFF43A047)
