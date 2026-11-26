@@ -70,7 +70,15 @@ fun SubscriptionsScreen(
                         )
                         val feed = OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
                         val ids = feed.entries.map { it.id }.toSet()
-                        val newIds = ids - sub.knownIds
+                        // Нові id накопичуємо (та сама логіка, що й у SubCheck):
+                        // інакше мітка «НОВЕ» зникала вже після наступної
+                        // перевірки, навіть якщо книгу не бачили. Перша
+                        // перевірка лише запам'ятовує базу, без «нових».
+                        val newIds = if (sub.knownIds.isEmpty()) {
+                            sub.newIds intersect ids
+                        } else {
+                            (sub.newIds + (ids - sub.knownIds)) intersect ids
+                        }
                         sub.copy(
                             knownIds = ids,
                             newIds = newIds,
