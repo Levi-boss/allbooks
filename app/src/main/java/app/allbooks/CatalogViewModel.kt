@@ -12,16 +12,16 @@ import app.allbooks.opds.OpdsParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayInputStream
 
 /** Стан стрічки каталогу: завантаження, заголовок, книги, помилка, «назад». */
@@ -32,7 +32,9 @@ data class CatalogUiState(
     val error: String? = null,
     val canGoBack: Boolean = false,
     val isHome: Boolean = true,
-    val feed: Feed? = null
+    val feed: Feed? = null,
+    // id поточного кроку стека: за ним екран тримає позицію прокрутки.
+    val navId: Int = 0
 )
 
 /** Стан глобального пошуку (одне поле по всіх каталогах). */
@@ -57,7 +59,17 @@ data class BatchState(
 )
 
 /** Один крок навігації стрічкою: адреси для спроби + каталог, звідки прийшли. */
-private data class NavEntry(val urls: List<String>, val catalog: Catalog?)
+/**
+ * Крок стека навігації. feed — кеш завантаженої сторінки: «Назад» показує
+ * її одразу, без повторного запиту в мережу. id — унікальний номер кроку,
+ * за ним екран тримає позицію прокрутки.
+ */
+private data class NavEntry(
+    val urls: List<String>,
+    val catalog: Catalog?,
+    val id: Int,
+    var feed: Feed? = null
+)
 
 /**
  * Стан перегляду каталогів: стек навігації, завантаження стрічки,
@@ -104,6 +116,10 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
     private var navStack = listOf<NavEntry>()
     private var loadJob: Job? = null
     private var batchJob: Job? = null
+    private var searchJob: Job? = null
+    private var nextNavId = 1
+    // Позиція прокрутки стрічки за id кроку стека (індекс + зсув).
+    private val feedScroll = mutableMapOf<Int, Pair<Int, Int>>()
 
     init {
         refreshSubscriptions()
@@ -121,9 +137,25 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
     /** Логін/пароль каталогу: свої поля у власного, інакше збережені окремо в AuthStore. */
     fun credsFor(cat: Catalog): Pair<String?, String?> {
         val auth = AuthStore.load(context)
-        val u = cat.user.takeIf { it.isNotBlank() } ?: auth[cat.name]?.first
-        val p = if (cat.user.isNotBlank()) cat.pass else auth[cat.name]?.second
+        // Ключ — назва + адреса: два каталоги з однаковою назвою не повинні
+        // ділити один пароль. Старий ключ (тільки назва) читаємо для
+        // сумісності з паролями, збереженими раніше.
+        val key = authKey(cat)
+        val u = cat.user.takeIf { it.isNotBlank() }
+            ?: auth[key]?.first ?: auth[cat.name]?.first
+        val p = if (cat.user.isNotBlank()) cat.pass
+            else auth[key]?.second ?: auth[cat.name]?.second
         return u to p
+    }
+
+    private fun authKey(cat: Catalog): String =
+        cat.name + " :: " + (cat.urls.firstOrNull().orEmpty())
+
+    /** Збережена позиція прокрутки стрічки для кроку стека. */
+    fun feedScroll(id: Int): Pair<Int, Int> = feedScroll[id] ?: (0 to 0)
+
+    fun saveFeedScroll(id: Int, index: Int, offset: Int) {
+        feedScroll[id] = index to offset
     }
 
     /** Логін/пароль для сторінки вибраної книги: її каталог або поточний. */
@@ -134,13 +166,28 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openCatalog(c: Catalog) {
         _currentCatalog.value = c
-        push(NavEntry(c.urls, c))
+        push(NavEntry(c.urls, c, nextNavId++))
     }
 
     /** Відкрити адресу в стрічці; catalog — якщо переходимо в інший каталог. */
     fun openUrl(url: String, catalog: Catalog? = null) {
         if (catalog != null) _currentCatalog.value = catalog
-        push(NavEntry(listOf(url), catalog ?: _currentCatalog.value))
+        push(NavEntry(listOf(url), catalog ?: _currentCatalog.value, nextNavId++))
+    }
+
+    /**
+     * Наступна сторінка стрічки («Далі»): замінює верхній крок стека,
+     * а не додає новий. Інакше після 10 сторінок «Назад» треба тиснути
+     * 10 разів, щоб вийти з розділу.
+     */
+    fun openNextPage(url: String) {
+        if (navStack.isEmpty()) {
+            openUrl(url)
+            return
+        }
+        navStack = navStack.dropLast(1) +
+            NavEntry(listOf(url), _currentCatalog.value, nextNavId++)
+        loadTop()
     }
 
     /** Відкрити підписку: нові книги показати, мітки «НОВЕ» скинути. */
@@ -182,7 +229,7 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    fun reload() = loadTop()
+    fun reload() = loadTop(force = true)
 
     /**
      * Пакетне завантаження: ставить у чергу список (книга + формат) через
@@ -211,11 +258,17 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
             for ((entry, link) in items) {
                 if (!isActive) break
                 try {
-                    if (Downloads.start(
+                    // Downloads.start читає SharedPreferences, розшифровує
+                    // пароль (SecretBox) і показує сповіщення — не на
+                    // головному потоці, інакше пакетне завантаження його
+                    // підвішує на кожній книзі.
+                    val ok = withContext(Dispatchers.IO) {
+                        Downloads.start(
                             context, entry, link, s, user, pass,
                             folder, settings, safFolderUri, quiet = true
                         )
-                    ) queued++ else failed++
+                    }
+                    if (ok) queued++ else failed++
                 } catch (e: Exception) {
                     AppLog.d("Batch download failed: ${entry.title}: ${e.message}")
                     failed++
@@ -250,47 +303,71 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearGlobalSearch() {
+        searchJob?.cancel()
         _globalSearch.value = GlobalSearchState()
     }
 
     // Глобальний пошук: питаємо всі каталоги паралельно. У кожного свій
     // шаблон пошуку (беремо з кореневої стрічки каталогу), тому спочатку
-    // вантажимо корінь, потім — пошук за шаблоном.
+    // вантажимо корінь, потім — пошук за шаблоном. Секції з'являються
+    // по мірі надходження, а не всі разом; один каталог не тримає
+    // крутилку довше 15 с (два запити, таймаут на обидва разом).
     fun submitGlobalSearch() {
         val q = _globalSearch.value.query.trim()
-        if (q.isEmpty() || _globalSearch.value.searching) return
-        _globalSearch.update { it.copy(searching = true, done = false) }
-        viewModelScope.launch {
+        if (q.isEmpty()) return
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            _globalSearch.update { it.copy(searching = true, done = false, sections = emptyList()) }
             val settings = SettingsStore.load(context)
             val catalogs = CATALOGS + _customCatalogs.value
-            val sections = withContext(Dispatchers.IO) {
+            try {
                 coroutineScope {
-                    catalogs.map { cat ->
-                        async {
-                            try {
-                                val client = Net.buildClient(settings)
-                                val (u, p) = credsFor(cat)
-                                val root = Net.fetchFirst(client, cat.urls, u, p)
-                                val rootFeed = OpdsParser.parse(
-                                    ByteArrayInputStream(root.bytes), root.url
-                                )
-                                val template = rootFeed.searchUrl ?: return@async null
-                                val sr = Net.fetchFirst(
-                                    client, listOf(searchUrlFor(template, q)), u, p
-                                )
-                                val sfeed = OpdsParser.parse(
-                                    ByteArrayInputStream(sr.bytes), sr.url
-                                )
-                                GlobalSection(cat, template, sfeed.entries)
+                    catalogs.forEach { cat ->
+                        launch(Dispatchers.IO) {
+                            val section: GlobalSection? = try {
+                                withTimeout(15_000) {
+                                    val client = Net.buildClient(settings)
+                                    val (u, p) = credsFor(cat)
+                                    val root = Net.fetchFirst(client, cat.urls, u, p)
+                                    val rootFeed = OpdsParser.parse(
+                                        ByteArrayInputStream(root.bytes), root.url
+                                    )
+                                    val template = rootFeed.searchUrl
+                                        ?: return@withTimeout null
+                                    val sr = Net.fetchFirst(
+                                        client, listOf(searchUrlFor(template, q)), u, p
+                                    )
+                                    val sfeed = OpdsParser.parse(
+                                        ByteArrayInputStream(sr.bytes), sr.url
+                                    )
+                                    GlobalSection(cat, template, sfeed.entries)
+                                }
+                            } catch (e: TimeoutCancellationException) {
+                                // Таймаут цього каталогу: тільки його секція
+                                // стає помилкою, решта каталогів шукається далі.
+                                AppLog.d("Global search timeout for ${cat.name}")
+                                GlobalSection(cat, null, emptyList(), e.message)
+                            } catch (e: CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 AppLog.d("Global search failed for ${cat.name}: ${e.message}")
                                 GlobalSection(cat, null, emptyList(), e.message)
                             }
+                            if (section != null) {
+                                _globalSearch.update { cur ->
+                                    cur.copy(sections = cur.sections + section)
+                                }
+                            }
                         }
-                    }.awaitAll().filterNotNull()
+                    }
+                }
+            } finally {
+                // Скасованому пошуку стан не чіпаємо: його вже скинув той,
+                // хто скасував (новий пошук, очищення або «Додому»).
+                if (isActive) {
+                    _globalSearch.update { it.copy(searching = false, done = true) }
                 }
             }
-            _globalSearch.update { it.copy(searching = false, sections = sections, done = true) }
         }
     }
 
@@ -305,7 +382,10 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
             CustomStore.save(context, next)
             _currentCatalog.value = updated
         } else {
-            val auth = AuthStore.load(context) + (cat.name to (user to pass))
+            // Пароль — під новим ключем (назва + адреса); старий запис
+            // за назвою прибираємо, щоб не лишалося дубля.
+            val auth = AuthStore.load(context)
+                .filterKeys { it != cat.name } + (authKey(cat) to (user to pass))
             AuthStore.save(context, auth)
         }
         AppLog.d("Auth saved for ${cat.name}")
@@ -351,17 +431,35 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
         loadTop()
     }
 
-    private fun loadTop() {
+    private fun loadTop(force: Boolean = false) {
         loadJob?.cancel()
         val top = navStack.lastOrNull()
         if (top == null) {
             _uiState.value = CatalogUiState()
             return
         }
+        // «Назад» на вже завантажену сторінку: показати кеш одразу,
+        // без повторного запиту в мережу. force — явне оновлення.
+        if (!force && top.feed != null) {
+            val feed = top.feed!!
+            _uiState.value = CatalogUiState(
+                loading = false,
+                title = feed.title,
+                entries = feed.entries,
+                error = null,
+                canGoBack = true,
+                isHome = false,
+                feed = feed,
+                navId = top.id
+            )
+            return
+        }
         val catalog = _currentCatalog.value
         val (user, pass) = catalog?.let { credsFor(it) } ?: (null to null)
         loadJob = viewModelScope.launch {
-            _uiState.value = CatalogUiState(loading = true, canGoBack = true, isHome = false)
+            _uiState.value = CatalogUiState(
+                loading = true, canGoBack = true, isHome = false, navId = top.id
+            )
             try {
                 val settings = SettingsStore.load(context)
                 val feed = withContext(Dispatchers.IO) {
@@ -369,6 +467,7 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
                     val r = Net.fetchFirst(client, top.urls, user, pass)
                     OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
                 }
+                top.feed = feed
                 _uiState.value = CatalogUiState(
                     loading = false,
                     title = feed.title,
@@ -376,7 +475,8 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
                     error = null,
                     canGoBack = true,
                     isHome = false,
-                    feed = feed
+                    feed = feed,
+                    navId = top.id
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -389,7 +489,8 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
                     error = e.message ?: e.javaClass.simpleName,
                     canGoBack = true,
                     isHome = false,
-                    feed = null
+                    feed = null,
+                    navId = top.id
                 )
                 if (e.message?.startsWith("HTTP 401") == true) _authRequired.value = true
             }
