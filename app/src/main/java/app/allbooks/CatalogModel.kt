@@ -4,7 +4,7 @@ import android.content.Context
 import app.allbooks.opds.Entry
 import java.net.URLEncoder
 
-internal data class Catalog(
+data class Catalog(
     val name: String,
     val note: String,
     val urls: List<String>,
@@ -22,7 +22,7 @@ internal data class Catalog(
 
 // Тільки перевірені 25.11.2026 каталоги. Видалено: Gutenberg — весь сайт дає 503,
 // ManyBooks — 403, OAPEN — OPDS-адреса дає 404.
-internal val CATALOGS = listOf(
+val CATALOGS = listOf(
     Catalog(
         "Flibusta",
         "Російськомовна та українська бібліотека",
@@ -46,7 +46,7 @@ internal val CATALOGS = listOf(
     )
 )
 
-internal object CustomStore {
+object CustomStore {
     private const val PREFS = "allbooks"
     private const val KEY = "custom_catalogs"
 
@@ -81,7 +81,7 @@ internal object CustomStore {
 
 /** Логін/пароль для каталогів окремо від їх списку: вбудовані каталоги
  *  теж можуть попросити авторизацію (401), а їх редагувати не можна. */
-internal object AuthStore {
+object AuthStore {
     private const val PREFS = "allbooks"
     private const val KEY = "catalog_auth"
 
@@ -109,13 +109,13 @@ internal object AuthStore {
     }
 }
 
-internal fun searchUrlFor(template: String, term: String): String {
+fun searchUrlFor(template: String, term: String): String {
     val enc = URLEncoder.encode(term, "UTF-8")
     return template.replace("{searchTerms}", enc).replace("%7BsearchTerms%7D", enc)
 }
 
 /** Одна секція результатів глобального пошуку: каталог і його книги. */
-internal data class GlobalSection(
+data class GlobalSection(
     val catalog: Catalog,
     val template: String?,
     val entries: List<Entry>,
