@@ -119,7 +119,14 @@ data class AppStrings(
     val read: String,
     val readFailed: String,
     val openWith: String,
-    val downloadAgain: String
+    val downloadAgain: String,
+    val downloadAll: String,
+    val batchConfirmTitle: String,
+    val batchConfirmText: String,
+    val batchDownloadFirst: String,
+    val batchProgress: String,
+    val batchDone: String,
+    val batchNothing: String
 )
 
 object AppLanguages {
@@ -257,7 +264,14 @@ object AppLanguages {
         read = "Read",
         readFailed = "Could not open this book in the reader",
         openWith = "Open in…",
-        downloadAgain = "Download again"
+        downloadAgain = "Download again",
+        downloadAll = "Download all",
+        batchConfirmTitle = "Download many books?",
+        batchConfirmText = "There are %1$d books in this list. Download the first %2$d?",
+        batchDownloadFirst = "Download %1$d",
+        batchProgress = "Queueing: %1$d / %2$d",
+        batchDone = "Queued: %1$d • skipped: %2$d • failed: %3$d",
+        batchNothing = "Nothing to download — everything is already downloaded."
     )
 
     val uk = AppStrings(
@@ -372,7 +386,14 @@ object AppLanguages {
         read = "Читати",
         readFailed = "Не вдалося відкрити книгу в читалці",
         openWith = "Відкрити в…",
-        downloadAgain = "Скачати знову"
+        downloadAgain = "Скачати знову",
+        downloadAll = "Завантажити всі",
+        batchConfirmTitle = "Завантажити багато книг?",
+        batchConfirmText = "У цьому списку %1$d книг. Завантажити перші %2$d?",
+        batchDownloadFirst = "Завантажити %1$d",
+        batchProgress = "У чергу: %1$d / %2$d",
+        batchDone = "У черзі: %1$d • пропущено: %2$d • помилок: %3$d",
+        batchNothing = "Немає що завантажувати — усе вже завантажено."
     )
 
     val ru = AppStrings(
@@ -487,6 +508,13 @@ object AppLanguages {
         read = "Читать",
         readFailed = "Не удалось открыть книгу в читалке",
         openWith = "Открыть в…",
-        downloadAgain = "Скачать снова"
+        downloadAgain = "Скачать снова",
+        downloadAll = "Скачать все",
+        batchConfirmTitle = "Скачать много книг?",
+        batchConfirmText = "В этом списке %1$d книг. Скачать первые %2$d?",
+        batchDownloadFirst = "Скачать %1$d",
+        batchProgress = "В очередь: %1$d / %2$d",
+        batchDone = "В очереди: %1$d • пропущено: %2$d • ошибок: %3$d",
+        batchNothing = "Нечего скачивать — всё уже скачено."
     )
 }
