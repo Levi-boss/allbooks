@@ -56,7 +56,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +68,6 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -172,7 +170,9 @@ private object CustomStore {
                 Catalog(
                     parts[0], url, listOf(url),
                     user = parts.getOrNull(2) ?: "",
-                    pass = parts.getOrNull(3) ?: ""
+                    // Пароль зберігається зашифрованим (SecretBox); старі
+                    // незашифровані значення читаються як є.
+                    pass = SecretBox.decrypt(parts.getOrNull(3) ?: "")
                 )
             }
         }
@@ -181,7 +181,7 @@ private object CustomStore {
     fun save(c: Context, list: List<Catalog>) {
         val raw = list.joinToString("\n") {
             val clean = { s: String -> s.replace("|", " ").replace("\n", " ").trim() }
-            clean(it.name) + "|" + clean(it.urls.first()) + "|" + clean(it.user) + "|" + it.pass.replace("|", " ").replace("\n", " ")
+            clean(it.name) + "|" + clean(it.urls.first()) + "|" + clean(it.user) + "|" + SecretBox.encrypt(it.pass)
         }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, raw).apply()
@@ -200,7 +200,9 @@ private object AuthStore {
         raw.lines().forEach { line ->
             val parts = line.split('|')
             if (parts.size >= 3 && parts[0].isNotBlank()) {
-                map[parts[0]] = parts[1] to parts[2]
+                // Пароль зберігається зашифрованим (SecretBox); старі
+                // незашифровані значення читаються як є.
+                map[parts[0]] = parts[1] to SecretBox.decrypt(parts[2])
             }
         }
         return map
@@ -209,7 +211,7 @@ private object AuthStore {
     fun save(c: Context, map: Map<String, Pair<String, String>>) {
         val raw = map.entries.joinToString("\n") { (name, up) ->
             val clean = { s: String -> s.replace("|", " ").replace("\n", " ").trim() }
-            clean(name) + "|" + clean(up.first) + "|" + up.second.replace("|", " ").replace("\n", " ")
+            clean(name) + "|" + clean(up.first) + "|" + SecretBox.encrypt(up.second)
         }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, raw).apply()
@@ -254,6 +256,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLog.d("BookMriya start")
+        // Завислі ручні завантаження (процес загинув) — у FAILED, щоб їх
+        // можна було повторити зі списку.
+        Downloads.failStale(this)
         ThemeChoice.set(SettingsStore.load(this).theme)
         // Фонова перевірка підписок (раз на день), якщо сповіщення ввімкнено.
         if (SettingsStore.load(this).notifyNewBooks) {
@@ -262,7 +267,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val dark = themeIsDark(ThemeChoice.theme)
-            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+            AllBooksTheme(dark = dark, dynamic = true) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CatalogScreen()
                 }
@@ -457,6 +462,12 @@ fun CatalogScreen() {
                 showSubscriptions = false
                 selected = null
                 newIds = ids
+                // Підписку відкрили — прочитані «нові» більше не нові.
+                val cleared = SubscriptionsStore.load(context).map {
+                    if (it.url == url) it.copy(newIds = emptySet()) else it
+                }
+                SubscriptionsStore.save(context, cleared)
+                subsVersion++
                 history.add(listOf(url))
             }
         )
