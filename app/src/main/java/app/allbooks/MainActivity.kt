@@ -262,7 +262,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val dark = themeIsDark(ThemeChoice.theme)
-            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
+            AllBooksTheme(dark = dark) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CatalogScreen()
                 }
