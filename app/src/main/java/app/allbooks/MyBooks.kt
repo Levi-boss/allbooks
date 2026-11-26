@@ -214,6 +214,27 @@ object MyBooks {
             .putString(KEY_READER_PKG, packageName).apply()
     }
 
+    /** Скинути запам'ятовану читалку: наступне «Відкрити» знову запитає. */
+    fun clearReaderPackage(context: Context) {
+        context.getSharedPreferences(READER_PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_READER_PKG).apply()
+    }
+
+    /** Назва застосунку за пакетом (null — застосунок не встановлено). */
+    fun readerAppLabel(context: Context, packageName: String): String? =
+        try {
+            val pm = context.packageManager
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getApplicationInfo(packageName, 0)
+            }
+            info.loadLabel(pm).toString()
+        } catch (e: Exception) {
+            null
+        }
+
     /** Чи може застосунок з пакета ще відкрити цю книгу (не видалено). */
     fun canOpenWith(context: Context, book: MyBook, packageName: String): Boolean =
         readerCandidates(context, book).any { it.packageName == packageName }
