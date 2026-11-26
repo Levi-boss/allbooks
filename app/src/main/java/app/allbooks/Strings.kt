@@ -267,10 +267,10 @@ object AppLanguages {
         downloadAgain = "Download again",
         downloadAll = "Download all",
         batchConfirmTitle = "Download many books?",
-        batchConfirmText = "There are %1$d books in this list. Download the first %2$d?",
-        batchDownloadFirst = "Download %1$d",
-        batchProgress = "Queueing: %1$d / %2$d",
-        batchDone = "Queued: %1$d • skipped: %2$d • failed: %3$d",
+        batchConfirmText = "There are %d books in this list. Download the first %d?",
+        batchDownloadFirst = "Download %d",
+        batchProgress = "Queueing: %d / %d",
+        batchDone = "Queued: %d • skipped: %d • failed: %d",
         batchNothing = "Nothing to download — everything is already downloaded."
     )
 
@@ -389,10 +389,10 @@ object AppLanguages {
         downloadAgain = "Скачати знову",
         downloadAll = "Завантажити всі",
         batchConfirmTitle = "Завантажити багато книг?",
-        batchConfirmText = "У цьому списку %1$d книг. Завантажити перші %2$d?",
-        batchDownloadFirst = "Завантажити %1$d",
-        batchProgress = "У чергу: %1$d / %2$d",
-        batchDone = "У черзі: %1$d • пропущено: %2$d • помилок: %3$d",
+        batchConfirmText = "У цьому списку %d книг. Завантажити перші %d?",
+        batchDownloadFirst = "Завантажити %d",
+        batchProgress = "У чергу: %d / %d",
+        batchDone = "У черзі: %d • пропущено: %d • помилок: %d",
         batchNothing = "Немає що завантажувати — усе вже завантажено."
     )
 
@@ -511,10 +511,10 @@ object AppLanguages {
         downloadAgain = "Скачать снова",
         downloadAll = "Скачать все",
         batchConfirmTitle = "Скачать много книг?",
-        batchConfirmText = "В этом списке %1$d книг. Скачать первые %2$d?",
-        batchDownloadFirst = "Скачать %1$d",
-        batchProgress = "В очередь: %1$d / %2$d",
-        batchDone = "В очереди: %1$d • пропущено: %2$d • ошибок: %3$d",
+        batchConfirmText = "В этом списке %d книг. Скачать первые %d?",
+        batchDownloadFirst = "Скачать %d",
+        batchProgress = "В очередь: %d / %d",
+        batchDone = "В очереди: %d • пропущено: %d • ошибок: %d",
         batchNothing = "Нечего скачивать — всё уже скачено."
     )
 }
