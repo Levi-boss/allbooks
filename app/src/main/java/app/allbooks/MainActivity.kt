@@ -55,6 +55,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -183,6 +184,7 @@ fun CatalogScreen() {
     val selectedBookTemplate by vm.selectedBookTemplate.collectAsState()
     val newIds by vm.newIds.collectAsState()
     val showAuth by vm.authRequired.collectAsState()
+    val batchState by vm.batchState.collectAsState()
     var settings by remember { mutableStateOf(SettingsStore.load(context)) }
     var languagePref by remember { mutableStateOf(LanguageStore.load(context)) }
     val lang = AppLanguages.resolve(languagePref)
@@ -198,6 +200,8 @@ fun CatalogScreen() {
     var searchExpanded by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
     var showAdd by remember { mutableStateOf(false) }
+    var batchConfirm by remember { mutableStateOf<Pair<List<Pair<Entry, Link>>, Int>?>(null) }
+    var batchToastRunId by remember { mutableStateOf(0L) }
     var folderSetupDismissed by remember { mutableStateOf(false) }
     var folderDraft by remember { mutableStateOf(settings.downloadFolder) }
 
@@ -260,6 +264,19 @@ fun CatalogScreen() {
     // Нова стрічка — ховаємо поле пошуку в ній (як було при зміні current).
     LaunchedEffect(uiState.feed) {
         searchExpanded = false
+    }
+
+    // Пакетне завантаження завершено — один підсумковий тост.
+    LaunchedEffect(batchState) {
+        val st = batchState
+        if (!st.running && st.total > 0 && st.runId != 0L && st.runId != batchToastRunId) {
+            batchToastRunId = st.runId
+            Toast.makeText(
+                context,
+                s.batchDone.format(st.queued, st.skipped, st.failed),
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     BackHandler(enabled = uiState.canGoBack || selected != null) {
@@ -346,6 +363,30 @@ fun CatalogScreen() {
         )
     }
 
+    // Пакетне завантаження: у списку більше за ліміт — підтвердити перші 30.
+    val bc = batchConfirm
+    if (bc != null) {
+        val (candidates, skipped) = bc
+        AlertDialog(
+            onDismissRequest = { batchConfirm = null },
+            title = { Text(s.batchConfirmTitle) },
+            text = { Text(s.batchConfirmText.format(candidates.size, BATCH_CAP)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    batchConfirm = null
+                    val (user, pass) = vm.detailCreds()
+                    vm.startBatchDownload(
+                        candidates.take(BATCH_CAP), skipped, user, pass,
+                        settings.downloadFolder, settings, settings.safFolderUri, s
+                    )
+                }) { Text(s.batchDownloadFirst.format(BATCH_CAP)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { batchConfirm = null }) { Text(s.cancel) }
+            }
+        )
+    }
+
     // Перший запуск: якщо папку завантажень ще не вибирали — запитати одразу.
     if (!settings.folderChosen && !folderSetupDismissed) {
         AlertDialog(
@@ -393,6 +434,39 @@ fun CatalogScreen() {
     // шаблон пошуку і логін/пароль її каталогу, інакше — поточної стрічки.
     val detailTemplate = selectedBookTemplate ?: uiState.feed?.searchUrl
     val (detailUser, detailPass) = vm.detailCreds()
+
+    // «Завантажити всі» для поточної стрічки: книги без формату і вже
+    // завантажені пропускаємо; більше за ліміт — питаємо підтвердження.
+    fun onDownloadAll() {
+        val feed = uiState.feed ?: return
+        if (batchState.running) return
+        scope.launch {
+            val downloaded = withContext(Dispatchers.IO) {
+                Reader.downloadedMap(context, settings, s)
+            }
+            var skipped = 0
+            val candidates = feed.entries.mapNotNull { e ->
+                val link = Downloads.preferredLink(e) ?: return@mapNotNull null
+                if (downloaded.containsKey(Reader.expectedFileName(e, link))) {
+                    skipped++
+                    null
+                } else e to link
+            }.distinctBy { (e, l) -> Reader.expectedFileName(e, l) }
+            if (candidates.isEmpty()) {
+                Toast.makeText(context, s.batchNothing, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            if (candidates.size > BATCH_CAP) {
+                batchConfirm = candidates to skipped
+            } else {
+                val (user, pass) = vm.detailCreds()
+                vm.startBatchDownload(
+                    candidates, skipped, user, pass,
+                    settings.downloadFolder, settings, settings.safFolderUri, s
+                )
+            }
+        }
+    }
 
     // Додому: список каталогів, як у старої програми.
     fun goHome() {
@@ -710,6 +784,39 @@ fun CatalogScreen() {
                                     }
                                 })
                             )
+                        }
+                    }
+                    val bookCount = f.entries.count { it.isBook }
+                    if (bookCount > 0) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { onDownloadAll() },
+                                modifier = Modifier.weight(1f),
+                                enabled = !batchState.running
+                            ) {
+                                Text("⬇ " + s.downloadAll + " ($bookCount)")
+                            }
+                        }
+                    }
+                    if (batchState.running) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                s.batchProgress.format(batchState.queued, batchState.total),
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { vm.cancelBatchDownload() }) {
+                                Text(s.cancel)
+                            }
                         }
                     }
                     if (settings.feedGrid) {
