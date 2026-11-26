@@ -643,6 +643,21 @@ object Downloads {
         clearMeta(context, id)
     }
 
+    /** URI готового файлу завантаження (для «Відкрити» з «Моїх книг»). */
+    fun uriFor(context: Context, id: Long): Uri? {
+        val safItem = readSafItem(context, id)
+        if (safItem != null) {
+            if (safItem.safDocUri.isBlank()) return null
+            return Uri.parse(safItem.safDocUri)
+        }
+        return try {
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            dm.getUriForDownloadedFile(id)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun open(context: Context, id: Long, s: AppStrings) {
         val safItem = readSafItem(context, id)
         if (safItem != null) {
