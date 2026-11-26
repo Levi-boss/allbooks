@@ -479,6 +479,25 @@ object ReaderStore {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("pos_$fileName", "$index:$offset").apply()
     }
+
+    /** Остання відкрита книга (ім'я файлу + назва) — для «Продовжити читання». */
+    fun lastRead(c: Context): Pair<String, String>? {
+        val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val file = prefs.getString("last_file", null) ?: return null
+        val name = prefs.getString("last_name", null) ?: return null
+        return file to name
+    }
+
+    fun saveLastRead(c: Context, book: ReaderBook) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("last_file", book.fileName)
+            .putString("last_name", book.displayName).apply()
+    }
+
+    fun clearLastRead(c: Context) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove("last_file").remove("last_name").apply()
+    }
 }
 
 /** Екран читання: заголовки й абзаци списком, A- / A+ — розмір шрифту. */
@@ -508,6 +527,7 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
             failed = true
         } else {
             blocks = parsed
+            ReaderStore.saveLastRead(context, book)
             if (savedPos.first >= parsed.size) {
                 listState.scrollToItem(0, 0)
             }
