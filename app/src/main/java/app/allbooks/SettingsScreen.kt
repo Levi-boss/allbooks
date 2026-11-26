@@ -60,6 +60,13 @@ fun SettingsScreen(
     var startCatalog by remember { mutableStateOf(settings.startCatalog) }
     var folder by remember { mutableStateOf(settings.downloadFolder) }
     var safFolderUri by remember { mutableStateOf(settings.safFolderUri) }
+    // Запам'ятана зовнішня читалка для «Відкрити» (null — запитувати щоразу).
+    var readerLabel by remember {
+        mutableStateOf(
+            MyBooks.savedReaderPackage(context)
+                ?.let { MyBooks.readerAppLabel(context, it) }
+        )
+    }
     val context = LocalContext.current
 
     fun buildSettings(): NetSettings = NetSettings(
@@ -314,6 +321,21 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = notifyNewBooks, onCheckedChange = { notifyNewBooks = it })
+            }
+
+            Spacer(Modifier.height(24.dp))
+            Text(s.externalReaderTitle, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                readerLabel ?: s.askEveryTime,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (readerLabel != null) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = {
+                    MyBooks.clearReaderPackage(context)
+                    readerLabel = null
+                }) { Text(s.resetReaderChoice) }
             }
 
             Spacer(Modifier.height(24.dp))
