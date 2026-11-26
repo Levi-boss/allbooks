@@ -90,24 +90,27 @@ object Reader {
         return "$safe.${Downloads.extension(link)}"
     }
 
-    /** Знайти завантажений файл для книги з каталогу (для кнопки «Читати»). */
-    fun findDownloaded(
+    /** Карта «ім'я файлу → завантажена книга» (диск, SAF, DownloadManager). */
+    fun downloadedMap(
         context: Context,
         settings: NetSettings,
-        s: AppStrings,
-        entry: Entry
-    ): ReaderBook? {
-        val books = try {
-            MyBooks.list(context, settings, s)
+        s: AppStrings
+    ): Map<String, MyBook> =
+        try {
+            MyBooks.list(context, settings, s).associateBy { it.fileName }
         } catch (e: Exception) {
-            return null
+            emptyMap()
         }
-        if (books.isEmpty()) return null
-        val byName = books.associateBy { it.fileName }
+
+    /** Знайти завантажений файл для книги з каталогу (для кнопки «Читати»). */
+    fun findDownloaded(
+        entry: Entry,
+        downloaded: Map<String, MyBook>
+    ): ReaderBook? {
+        if (downloaded.isEmpty()) return null
         for (link in entry.links) {
             if (!link.isAcquisition) continue
-            val name = expectedFileName(entry, link)
-            val b = byName[name] ?: continue
+            val b = downloaded[expectedFileName(entry, link)] ?: continue
             if (!supports(b.fileName)) continue
             return ReaderBook.fromMyBook(b)
         }
