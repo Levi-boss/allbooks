@@ -197,6 +197,25 @@ object Downloads {
         return if (t.contains("fb2") && t.contains("zip")) "fb2.zip" else link.format
     }
 
+    /** Формат для пакетного завантаження: fb2, потім fb2.zip, epub, txt, інше. */
+    fun preferredLink(entry: Entry): Link? {
+        val links = entry.links.filter { it.isAcquisition }
+        if (links.isEmpty()) return null
+        fun rank(l: Link): Int {
+            val t = l.type.lowercase()
+            return when {
+                t.contains("fb2") && !t.contains("zip") -> 0
+                t.contains("fb2") -> 1
+                t.contains("epub") -> 2
+                t.contains("txt") -> 3
+                else -> 4
+            }
+        }
+        return links.minByOrNull { rank(it) }
+    }
+
+    /** Почати одне завантаження. Повертає false, якщо не вдалося стати в чергу.
+     *  quiet = true — без сповіщень-тостів про кожен файл (для пакетного завантаження). */
     fun start(
         context: Context,
         entry: Entry,
@@ -206,8 +225,9 @@ object Downloads {
         pass: String? = null,
         folder: String = "BookMriya",
         settings: NetSettings = NetSettings(),
-        safFolderUri: String = ""
-    ) {
+        safFolderUri: String = "",
+        quiet: Boolean = false
+    ): Boolean {
         val safe = entry.title
             .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
             .trim()
@@ -220,10 +240,10 @@ object Downloads {
             else -> "dm"
         }
         AppLog.d("Download start: $name (${link.format}) via $via")
-        if (safFolderUri.isNotBlank()) {
-            startSaf(context, link.href, entry.title, name, safFolderUri, user, pass, settings, s)
+        return if (safFolderUri.isNotBlank()) {
+            startSaf(context, link.href, entry.title, name, safFolderUri, user, pass, settings, s, quiet)
         } else {
-            enqueue(context, link.href, entry.title, name, folder, user, pass, s, settings)
+            enqueue(context, link.href, entry.title, name, folder, user, pass, s, settings, quiet)
         }
     }
 
@@ -269,7 +289,7 @@ object Downloads {
             }
     }
 
-    private fun enqueue(context: Context, url: String, title: String, name: String, folder: String, user: String?, pass: String?, s: AppStrings, settings: NetSettings = NetSettings()) {
+    private fun enqueue(context: Context, url: String, title: String, name: String, folder: String, user: String?, pass: String?, s: AppStrings, settings: NetSettings = NetSettings(), quiet: Boolean = false): Boolean {
         val cleanFolder = folder
             .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
             .trim()
@@ -277,10 +297,9 @@ object Downloads {
         // Системний DownloadManager не знає про проксі та DoH застосунку:
         // з ними качаємо самі через OkHttp і пишемо в загальну папку Завантаження.
         if (settings.proxyMode != ProxyMode.NONE || settings.useDoh) {
-            startOkHttp(context, url, title, name, cleanFolder, user, pass, settings, s)
-            return
+            return startOkHttp(context, url, title, name, cleanFolder, user, pass, settings, s, quiet)
         }
-        try {
+        return try {
             val req = DownloadManager.Request(Uri.parse(url))
                 .setTitle(title)
                 .setNotificationVisibility(
@@ -301,10 +320,12 @@ object Downloads {
                 context, id,
                 listOf(url, title, name, cleanFolder, user ?: "", pass ?: "", "dm")
             )
-            Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+            if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+            true
         } catch (e: Exception) {
             AppLog.d("Download failed (dm): $name: ${e.message}")
-            Toast.makeText(context, "${s.errorTitle}: ${e.message}", Toast.LENGTH_LONG).show()
+            if (!quiet) Toast.makeText(context, "${s.errorTitle}: ${e.message}", Toast.LENGTH_LONG).show()
+            false
         }
     }
 
@@ -324,8 +345,9 @@ object Downloads {
         user: String?,
         pass: String?,
         settings: NetSettings,
-        s: AppStrings
-    ) {
+        s: AppStrings,
+        quiet: Boolean = false
+    ): Boolean {
         val appContext = context.applicationContext
         var id = System.currentTimeMillis()
         while (readSafItem(appContext, id) != null) id++
@@ -340,7 +362,7 @@ object Downloads {
             listOf(url, title, name, folder, user ?: "", pass ?: "", "okhttp")
         )
         showSafNotification(appContext, s, item)
-        Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+        if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         safScope.launch {
             var downloaded = 0L
             var total = -1L
@@ -436,6 +458,7 @@ object Downloads {
                 saveProgress(DownloadManager.STATUS_FAILED)
             }
         }
+        return true
     }
 
     /**
@@ -452,8 +475,9 @@ object Downloads {
         user: String?,
         pass: String?,
         settings: NetSettings,
-        s: AppStrings
-    ) {
+        s: AppStrings,
+        quiet: Boolean = false
+    ): Boolean {
         val appContext = context.applicationContext
         var id = System.currentTimeMillis()
         while (readSafItem(appContext, id) != null) id++
@@ -468,7 +492,7 @@ object Downloads {
             listOf(url, title, name, folderUri, user ?: "", pass ?: "", "saf")
         )
         showSafNotification(appContext, s, item)
-        Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+        if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         safScope.launch {
             var downloaded = 0L
             var total = -1L
@@ -533,6 +557,7 @@ object Downloads {
                 saveProgress(DownloadManager.STATUS_FAILED)
             }
         }
+        return true
     }
 
     fun list(context: Context, s: AppStrings): List<DownloadItem> {
