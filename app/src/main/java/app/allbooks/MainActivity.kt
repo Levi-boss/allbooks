@@ -286,6 +286,19 @@ fun CatalogScreen() {
     BackHandler(enabled = showDownloads) { showDownloads = false }
     BackHandler(enabled = showMyBooks) { showMyBooks = false }
     BackHandler(enabled = showSubscriptions) { showSubscriptions = false }
+    // Читалка — найвищий шар: її можна відкрити з будь-якого екрана
+    // («Читати» у «Моїх книгах»), тому перевіряється першою. Інакше
+    // onRead ставив readingBook, але екран лишався старим, і читалка
+    // з'являлася тільки після повернення назад.
+    if (readingBook != null) {
+        ReaderScreen(
+            s = s,
+            book = readingBook!!,
+            dark = themeIsDark(settings.theme),
+            onBack = { readingBook = null }
+        )
+        return
+    }
     if (showSubscriptions) {
         SubscriptionsScreen(
             s = s,
@@ -325,15 +338,6 @@ fun CatalogScreen() {
             settings = settings,
             onBack = { showMyBooks = false },
             onRead = { readingBook = ReaderBook.fromMyBook(it) }
-        )
-        return
-    }
-    if (readingBook != null) {
-        ReaderScreen(
-            s = s,
-            book = readingBook!!,
-            dark = themeIsDark(settings.theme),
-            onBack = { readingBook = null }
         )
         return
     }
