@@ -36,8 +36,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
@@ -70,6 +72,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -360,6 +363,8 @@ fun CatalogScreen() {
         AuthDialog(
             s = s,
             catalogName = currentCatalog!!.name,
+            isHttp = currentCatalog!!.urls.firstOrNull()
+                ?.startsWith("http://") == true,
             initialUser = authUser ?: "",
             initialPass = authPass ?: "",
             onDismiss = { vm.dismissAuth() },
@@ -748,6 +753,32 @@ fun CatalogScreen() {
                     }
                 }
                 f != null -> Column(Modifier.fillMaxSize()) {
+                    // Позиція прокрутки тримається за кроком стека:
+                    // «Назад» з книги або з розділу повертає туди, де був.
+                    val (savedIndex, savedOffset) = vm.feedScroll(uiState.navId)
+                    val listState = remember(uiState.navId) {
+                        LazyListState(savedIndex, savedOffset)
+                    }
+                    val gridState = remember(uiState.navId) {
+                        LazyGridState(savedIndex, savedOffset)
+                    }
+                    DisposableEffect(uiState.navId) {
+                        onDispose {
+                            if (settings.feedGrid) {
+                                vm.saveFeedScroll(
+                                    uiState.navId,
+                                    gridState.firstVisibleItemIndex,
+                                    gridState.firstVisibleItemScrollOffset
+                                )
+                            } else {
+                                vm.saveFeedScroll(
+                                    uiState.navId,
+                                    listState.firstVisibleItemIndex,
+                                    listState.firstVisibleItemScrollOffset
+                                )
+                            }
+                        }
+                    }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -827,13 +858,14 @@ fun CatalogScreen() {
                         FeedGrid(
                             s = s,
                             feed = f,
+                            gridState = gridState,
                             newIds = newIds,
                             onBook = { vm.selectBook(it) },
                             onOpen = { target -> vm.openUrl(target) },
-                            onNext = { next -> vm.openUrl(next) }
+                            onNext = { next -> vm.openNextPage(next) }
                         )
                     } else {
-                        LazyColumn(Modifier.fillMaxSize()) {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
                             items(f.entries) { e ->
                                 EntryRow(
                                     s = s,
@@ -846,7 +878,7 @@ fun CatalogScreen() {
                             f.nextUrl?.let { next ->
                                 item {
                                     TextButton(
-                                        onClick = { vm.openUrl(next) },
+                                        onClick = { vm.openNextPage(next) },
                                         modifier = Modifier.padding(8.dp)
                                     ) { Text(s.nextPage) }
                                 }
@@ -1103,6 +1135,7 @@ private fun CatalogDialog(
 private fun AuthDialog(
     s: AppStrings,
     catalogName: String,
+    isHttp: Boolean,
     initialUser: String,
     initialPass: String,
     onDismiss: () -> Unit,
@@ -1135,6 +1168,14 @@ private fun AuthDialog(
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp)
                 )
+                if (isHttp) {
+                    Text(
+                        s.authHttpWarning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
         },
         confirmButton = { TextButton(onClick = { onSave(user.trim(), pass) }) { Text(s.save) } },
@@ -1322,6 +1363,7 @@ private fun FormatChip(format: String, downloaded: Boolean = false, onClick: () 
 private fun FeedGrid(
     s: AppStrings,
     feed: Feed,
+    gridState: LazyGridState,
     newIds: Set<String>,
     onBook: (Entry) -> Unit,
     onOpen: (String) -> Unit,
@@ -1330,6 +1372,7 @@ private fun FeedGrid(
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
+        state = gridState,
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)

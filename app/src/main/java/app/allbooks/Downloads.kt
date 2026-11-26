@@ -25,11 +25,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.Credentials
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.Collections
 
 data class DownloadItem(
     val id: Long,
@@ -72,6 +75,16 @@ object Downloads {
     private const val SAF_ITEM_PREFIX = "item_"
 
     private val safScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // id завантажень OkHttp/SAF, чиї корутини зараз живі. failStale їх
+    // пропускає: поворот екрана (новий onCreate) не повинен валити
+    // завантаження, що ще йдуть. Набір лише в пам'яті — після загибелі
+    // процесу він порожній, і завислі записи чесно стають FAILED.
+    private val activeIds = Collections.synchronizedSet(mutableSetOf<Long>())
+
+    // Не більше трьох одночасних OkHttp/SAF-завантажень: пакетне
+    // завантаження (до 30 книг) інакше б'є в один сервер ~30 з'єднаннями.
+    private val downloadSlots = Semaphore(3)
 
     private fun trackedIds(c: Context): List<Long> {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
@@ -286,6 +299,7 @@ object Downloads {
                 it.status == DownloadManager.STATUS_RUNNING ||
                     it.status == DownloadManager.STATUS_PENDING
             }
+            .filter { it.id !in activeIds }
             .forEach { item ->
                 saveSafItem(appContext, item.copy(status = DownloadManager.STATUS_FAILED))
                 cancelSafNotification(appContext, item.id)
@@ -367,6 +381,9 @@ object Downloads {
         showSafNotification(appContext, s, item)
         if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         safScope.launch {
+            activeIds.add(id)
+            try {
+                downloadSlots.withPermit {
             var downloaded = 0L
             var total = -1L
             var docUri: Uri? = null
@@ -395,7 +412,7 @@ object Downloads {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         val values = ContentValues().apply {
                             put(MediaStore.Downloads.DISPLAY_NAME, name)
-                            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                            put(MediaStore.Downloads.MIME_TYPE, MyBooks.mimeFor(name))
                             put(MediaStore.Downloads.RELATIVE_PATH, "Download/$folder")
                         }
                         docUri = appContext.contentResolver.insert(
@@ -460,6 +477,10 @@ object Downloads {
                 targetFile?.delete()
                 saveProgress(DownloadManager.STATUS_FAILED)
             }
+                }
+            } finally {
+                activeIds.remove(id)
+            }
         }
         return true
     }
@@ -497,6 +518,9 @@ object Downloads {
         showSafNotification(appContext, s, item)
         if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         safScope.launch {
+            activeIds.add(id)
+            try {
+                downloadSlots.withPermit {
             var downloaded = 0L
             var total = -1L
             var docUri: Uri? = null
@@ -516,7 +540,7 @@ object Downloads {
                 )
                 docUri = DocumentsContract.createDocument(
                     appContext.contentResolver, treeDoc,
-                    "application/octet-stream", name
+                    MyBooks.mimeFor(name), name
                 ) ?: throw IOException("createDocument returned null")
                 val reqBuilder = Request.Builder()
                     .url(url)
@@ -558,6 +582,10 @@ object Downloads {
                     }
                 }
                 saveProgress(DownloadManager.STATUS_FAILED)
+            }
+                }
+            } finally {
+                activeIds.remove(id)
             }
         }
         return true
