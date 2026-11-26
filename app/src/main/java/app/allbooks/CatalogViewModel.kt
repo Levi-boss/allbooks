@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.allbooks.net.Net
+import app.allbooks.net.NetSettings
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Feed
+import app.allbooks.opds.Link
 import app.allbooks.opds.OpdsParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,19 @@ data class GlobalSearchState(
     val searching: Boolean = false,
     val sections: List<GlobalSection> = emptyList(),
     val done: Boolean = false
+)
+
+/** Ліміт пакетного завантаження: більше — тільки після підтвердження. */
+const val BATCH_CAP = 30
+
+/** Стан пакетного завантаження: скільки стало в чергу з усього списку. */
+data class BatchState(
+    val running: Boolean = false,
+    val queued: Int = 0,
+    val total: Int = 0,
+    val skipped: Int = 0,
+    val failed: Int = 0,
+    val runId: Long = 0L
 )
 
 /** Один крок навігації стрічкою: адреси для спроби + каталог, звідки прийшли. */
@@ -82,8 +97,12 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
     private val _authRequired = MutableStateFlow(false)
     val authRequired: StateFlow<Boolean> = _authRequired.asStateFlow()
 
+    private val _batchState = MutableStateFlow(BatchState())
+    val batchState: StateFlow<BatchState> = _batchState.asStateFlow()
+
     private var navStack = listOf<NavEntry>()
     private var loadJob: Job? = null
+    private var batchJob: Job? = null
 
     init {
         refreshSubscriptions()
@@ -163,6 +182,53 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reload() = loadTop()
+
+    /**
+     * Пакетне завантаження: ставить у чергу список (книга + формат) через
+     * існуючий Downloads.start, без тостів про кожен файл. Помилка одного
+     * файлу чергу не валить. Скасування — через cancelBatchDownload():
+     * нові завантаження після нього не стартують.
+     */
+    fun startBatchDownload(
+        items: List<Pair<Entry, Link>>,
+        skipped: Int,
+        user: String?,
+        pass: String?,
+        folder: String,
+        settings: NetSettings,
+        safFolderUri: String,
+        s: AppStrings
+    ) {
+        if (_batchState.value.running) return
+        val runId = System.currentTimeMillis()
+        batchJob = viewModelScope.launch {
+            _batchState.value = BatchState(
+                running = true, total = items.size, skipped = skipped, runId = runId
+            )
+            var queued = 0
+            var failed = 0
+            for ((entry, link) in items) {
+                if (!isActive) break
+                try {
+                    if (Downloads.start(
+                            context, entry, link, s, user, pass,
+                            folder, settings, safFolderUri, quiet = true
+                        )
+                    ) queued++ else failed++
+                } catch (e: Exception) {
+                    AppLog.d("Batch download failed: ${entry.title}: ${e.message}")
+                    failed++
+                }
+                _batchState.update { it.copy(queued = queued, failed = failed) }
+            }
+            _batchState.update { it.copy(running = false, queued = queued, failed = failed) }
+        }
+    }
+
+    /** Скасувати пакетне завантаження: нові файли в чергу не підуть. */
+    fun cancelBatchDownload() {
+        batchJob?.cancel()
+    }
 
     fun selectBook(e: Entry, catalog: Catalog? = null, template: String? = null) {
         _selectedBook.value = e
