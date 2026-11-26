@@ -64,6 +64,53 @@ fun MyBooksScreen(
 
     LaunchedEffect(Unit) { reload() }
 
+    // «Відкрити»: при першому відкритті — вибір читалки зі списку,
+    // вибір запам'ятовується і далі книга відкривається одразу в ній.
+    var openPickerFor by remember { mutableStateOf<MyBook?>(null) }
+    var openCandidates by remember { mutableStateOf<List<MyBooks.ReaderApp>>(emptyList()) }
+
+    fun onOpen(book: MyBook) {
+        val saved = MyBooks.savedReaderPackage(context)
+        if (saved != null && MyBooks.canOpenWith(context, book, saved)) {
+            MyBooks.open(context, book, s, saved)
+            return
+        }
+        val candidates = MyBooks.readerCandidates(context, book)
+        when {
+            candidates.isEmpty() -> MyBooks.open(context, book, s)
+            candidates.size == 1 -> MyBooks.open(context, book, s, candidates[0].packageName)
+            else -> {
+                openPickerFor = book
+                openCandidates = candidates
+            }
+        }
+    }
+
+    if (openPickerFor != null) {
+        val book = openPickerFor!!
+        AlertDialog(
+            onDismissRequest = { openPickerFor = null },
+            title = { Text(s.openWithTitle) },
+            text = {
+                Column {
+                    openCandidates.forEach { app ->
+                        TextButton(
+                            onClick = {
+                                MyBooks.saveReaderPackage(context, app.packageName)
+                                openPickerFor = null
+                                MyBooks.open(context, book, s, app.packageName)
+                            }
+                        ) { Text(app.label) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { openPickerFor = null }) { Text(s.cancel) }
+            }
+        )
+    }
+
     if (toDelete != null) {
         val book = toDelete!!
         AlertDialog(
@@ -152,7 +199,7 @@ fun MyBooksScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Button(onClick = { MyBooks.open(context, book, s) }) {
+                            Button(onClick = { onOpen(book) }) {
                                 Text(s.open)
                             }
                             if (Reader.supports(book.fileName)) {
