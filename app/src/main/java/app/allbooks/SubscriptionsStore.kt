@@ -31,7 +31,9 @@ object SubscriptionsStore {
                 newIds = parts.getOrNull(4)?.split(',')?.filter { it.isNotBlank() }?.toSet() ?: emptySet(),
                 lastCheck = parts.getOrNull(5)?.toLongOrNull() ?: 0L,
                 user = parts.getOrNull(6) ?: "",
-                pass = parts.getOrNull(7) ?: ""
+                // Пароль зберігається зашифрованим (SecretBox); старі
+                // незашифровані значення читаються як є.
+                pass = SecretBox.decrypt(parts.getOrNull(7) ?: "")
             )
         }
     }
@@ -44,7 +46,7 @@ object SubscriptionsStore {
                 it.knownIds.joinToString(","),
                 it.newIds.joinToString(","),
                 it.lastCheck.toString(),
-                clean(it.user), it.pass.replace("|", " ").replace("\n", " ")
+                clean(it.user), SecretBox.encrypt(it.pass)
             ).joinToString("|")
         }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, raw).apply()
