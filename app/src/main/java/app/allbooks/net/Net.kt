@@ -41,9 +41,50 @@ data class NetSettings(
 
 class FetchResult(val url: String, val bytes: ByteArray)
 
+/** Логін і пароль для SOCKS5. Віддаються лише SOCKS-запитам, жодним іншим серверам. */
+private object SocksAuth : java.net.Authenticator() {
+    @Volatile
+    var user: String = ""
+
+    @Volatile
+    var pass: String = ""
+
+    override fun getPasswordAuthentication(): PasswordAuthentication? {
+        val proto = getRequestingProtocol() ?: return null
+        if (!proto.startsWith("SOCKS") || user.isEmpty()) return null
+        return PasswordAuthentication(user, pass.toCharArray())
+    }
+}
+
 object Net {
 
+    private data class Key(
+        val mode: ProxyMode,
+        val host: String,
+        val port: Int,
+        val user: String,
+        val pass: String,
+        val doh: Boolean
+    )
+
+    private val lock = Any()
+    private var cachedKey: Key? = null
+    private var cachedClient: OkHttpClient? = null
+
+    /** Повертає спільний клієнт; нова збірка лише коли змінились налаштування проксі чи DoH. */
     fun buildClient(s: NetSettings): OkHttpClient {
+        val key = Key(s.proxyMode, s.proxyHost, s.proxyPort, s.proxyUser, s.proxyPass, s.useDoh)
+        synchronized(lock) {
+            val existing = cachedClient
+            if (existing != null && key == cachedKey) return existing
+            val fresh = create(s)
+            cachedKey = key
+            cachedClient = fresh
+            return fresh
+        }
+    }
+
+    private fun create(s: NetSettings): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
@@ -52,6 +93,9 @@ object Net {
 
         val proxyOn = s.proxyMode != ProxyMode.NONE &&
             s.proxyHost.isNotBlank() && s.proxyPort > 0
+
+        SocksAuth.user = ""
+        SocksAuth.pass = ""
 
         if (proxyOn) {
             val type = if (s.proxyMode == ProxyMode.SOCKS5) Proxy.Type.SOCKS else Proxy.Type.HTTP
@@ -69,11 +113,9 @@ object Net {
                             .build()
                     })
                 } else {
-                    java.net.Authenticator.setDefault(object : java.net.Authenticator() {
-                        override fun getPasswordAuthentication(): PasswordAuthentication {
-                            return PasswordAuthentication(s.proxyUser, s.proxyPass.toCharArray())
-                        }
-                    })
+                    SocksAuth.user = s.proxyUser
+                    SocksAuth.pass = s.proxyPass
+                    java.net.Authenticator.setDefault(SocksAuth)
                 }
             }
         }
