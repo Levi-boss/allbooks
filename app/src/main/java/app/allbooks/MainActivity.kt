@@ -748,10 +748,26 @@ fun CatalogScreen() {
                             }
                         }
                     } else {
+                        val lastRead = ReaderStore.lastRead(context)
                         HomeList(
                             s = s,
                             lang = lang,
                             custom = custom,
+                            lastRead = lastRead,
+                            onContinue = {
+                                val fileName = lastRead?.first ?: return@HomeList
+                                val myBook = Reader.downloadedMap(
+                                    context, settings, s
+                                )[fileName]
+                                if (myBook != null) {
+                                    readingBook = ReaderBook.fromMyBook(myBook)
+                                } else {
+                                    ReaderStore.clearLastRead(context)
+                                    Toast.makeText(
+                                        context, s.continueMissing, Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
                             onOpen = { c -> vm.openCatalog(c) },
                             onDelete = { c -> vm.deleteCustomCatalog(c) },
                             onEdit = { c -> editingCatalog = c }
@@ -1226,6 +1242,8 @@ private fun HomeList(
     s: AppStrings,
     lang: String,
     custom: List<Catalog>,
+    lastRead: Pair<String, String>?,
+    onContinue: () -> Unit,
     onOpen: (Catalog) -> Unit,
     onDelete: (Catalog) -> Unit,
     onEdit: (Catalog) -> Unit
@@ -1254,6 +1272,39 @@ private fun HomeList(
                     color = Color(0xFFE53935),
                     letterSpacing = 2.sp
                 )
+            }
+        }
+        if (lastRead != null) {
+            item {
+                Card(
+                    onClick = onContinue,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            "▶ " + s.continueReading,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            lastRead.second,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
         items(CATALOGS) { c -> CatalogRow(s, c, lang, onOpen, null, null) }
