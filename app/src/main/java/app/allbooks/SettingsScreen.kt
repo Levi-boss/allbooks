@@ -60,6 +60,7 @@ fun SettingsScreen(
     var startCatalog by remember { mutableStateOf(settings.startCatalog) }
     var folder by remember { mutableStateOf(settings.downloadFolder) }
     var safFolderUri by remember { mutableStateOf(settings.safFolderUri) }
+    val context = LocalContext.current
     // Запам'ятана зовнішня читалка для «Відкрити» (null — запитувати щоразу).
     var readerLabel by remember {
         mutableStateOf(
@@ -67,7 +68,6 @@ fun SettingsScreen(
                 ?.let { MyBooks.readerAppLabel(context, it) }
         )
     }
-    val context = LocalContext.current
 
     fun buildSettings(): NetSettings = NetSettings(
         proxyMode = mode,
