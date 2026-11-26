@@ -458,7 +458,7 @@ object Downloads {
                 saveProgress(DownloadManager.STATUS_FAILED)
             }
         }
-        true
+        return true
     }
 
     /**
@@ -557,7 +557,7 @@ object Downloads {
                 saveProgress(DownloadManager.STATUS_FAILED)
             }
         }
-        true
+        return true
     }
 
     fun list(context: Context, s: AppStrings): List<DownloadItem> {
