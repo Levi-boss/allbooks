@@ -117,7 +117,9 @@ data class AppStrings(
     val gridView: String,
     val listView: String,
     val read: String,
-    val readFailed: String
+    val readFailed: String,
+    val openWith: String,
+    val downloadAgain: String
 )
 
 object AppLanguages {
@@ -253,7 +255,9 @@ object AppLanguages {
         gridView = "Grid",
         listView = "List",
         read = "Read",
-        readFailed = "Could not open this book in the reader"
+        readFailed = "Could not open this book in the reader",
+        openWith = "Open in…",
+        downloadAgain = "Download again"
     )
 
     val uk = AppStrings(
@@ -366,7 +370,9 @@ object AppLanguages {
         gridView = "Сітка",
         listView = "Список",
         read = "Читати",
-        readFailed = "Не вдалося відкрити книгу в читалці"
+        readFailed = "Не вдалося відкрити книгу в читалці",
+        openWith = "Відкрити в…",
+        downloadAgain = "Скачати знову"
     )
 
     val ru = AppStrings(
@@ -479,6 +485,8 @@ object AppLanguages {
         gridView = "Сетка",
         listView = "Список",
         read = "Читать",
-        readFailed = "Не удалось открыть книгу в читалке"
+        readFailed = "Не удалось открыть книгу в читалке",
+        openWith = "Открыть в…",
+        downloadAgain = "Скачать снова"
     )
 }
