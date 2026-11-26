@@ -1,5 +1,7 @@
 # BookMriya (AllBooks)
 
+[![Build APK](https://github.com/Levi-boss/allbooks/actions/workflows/build.yml/badge.svg)](https://github.com/Levi-boss/allbooks/actions/workflows/build.yml)
+
 **[Українська](#українська)** · **[English](#english)** · **[Русский](#русский)**
 
 OPDS client for Android · OPDS-клієнт для Android · OPDS-клиент для Android
