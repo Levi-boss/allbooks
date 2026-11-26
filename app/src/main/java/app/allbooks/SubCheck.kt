@@ -42,7 +42,15 @@ object SubCheck {
                     )
                     val feed = OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
                     val ids = feed.entries.map { it.id }.toSet()
-                    val newIds = ids - sub.knownIds
+                    // Нові id накопичуємо: інакше мітка «НОВЕ» зникала вже
+                    // після наступної перевірки, навіть якщо користувач
+                    // книгу не бачив. Перша перевірка (відомих ще нема) —
+                    // лише запам'ятовує базу, без «нових» і без сповіщення.
+                    val newIds = if (sub.knownIds.isEmpty()) {
+                        sub.newIds intersect ids
+                    } else {
+                        (sub.newIds + (ids - sub.knownIds)) intersect ids
+                    }
                     sub.copy(
                         knownIds = ids,
                         newIds = newIds,
