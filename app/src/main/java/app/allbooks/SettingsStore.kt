@@ -6,8 +6,7 @@ import app.allbooks.net.ProxyMode
 
 /**
  * Зберігання налаштувань мережі (проксі, DoH) в SharedPreferences.
- * Пароль проксі зберігається у відкритому вигляді, як і в оригінальному
- * All Books (логін/пароль сервера) — це локальне сховище застосунку.
+ * Пароль проксі шифрується ключем з Android Keystore (див. SecretBox).
  */
 object SettingsStore {
     private const val PREFS = "allbooks_settings"
@@ -24,7 +23,7 @@ object SettingsStore {
             proxyHost = p.getString("proxy_host", "") ?: "",
             proxyPort = p.getInt("proxy_port", 0),
             proxyUser = p.getString("proxy_user", "") ?: "",
-            proxyPass = p.getString("proxy_pass", "") ?: "",
+            proxyPass = SecretBox.decrypt(p.getString("proxy_pass", "") ?: ""),
             useDoh = p.getBoolean("use_doh", false),
             startCatalog = p.getString("start_catalog", "") ?: "",
             downloadFolder = p.getString("download_folder", "BookMriya") ?: "BookMriya",
@@ -42,7 +41,7 @@ object SettingsStore {
             .putString("proxy_host", s.proxyHost)
             .putInt("proxy_port", s.proxyPort)
             .putString("proxy_user", s.proxyUser)
-            .putString("proxy_pass", s.proxyPass)
+            .putString("proxy_pass", SecretBox.encrypt(s.proxyPass))
             .putBoolean("use_doh", s.useDoh)
             .putString("start_catalog", s.startCatalog)
             .putString("download_folder", s.downloadFolder)
