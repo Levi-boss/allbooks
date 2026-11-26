@@ -70,9 +70,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -88,6 +87,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -103,133 +103,10 @@ import app.allbooks.opds.Feed
 import app.allbooks.opds.Link
 import app.allbooks.opds.OpdsParser
 import coil.compose.AsyncImage
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
-import java.net.URLEncoder
-
-private data class Catalog(
-    val name: String,
-    val note: String,
-    val urls: List<String>,
-    val user: String = "",
-    val pass: String = "",
-    val noteEn: String = note,
-    val noteRu: String = note
-) {
-    fun noteFor(lang: String): String = when (lang) {
-        "en" -> noteEn
-        "ru" -> noteRu
-        else -> note
-    }
-}
-
-// Тільки перевірені 25.11.2026 каталоги. Видалено: Gutenberg — весь сайт дає 503,
-// ManyBooks — 403, OAPEN — OPDS-адреса дає 404.
-private val CATALOGS = listOf(
-    Catalog(
-        "Flibusta",
-        "Російськомовна та українська бібліотека",
-        listOf("http://flibusta.is/opds"),
-        noteEn = "Russian- and Ukrainian-language library",
-        noteRu = "Русскоязычная и украинская библиотека"
-    ),
-    Catalog(
-        "CoolLib",
-        "Російськомовна та українська бібліотека",
-        listOf("https://coollib.com/opds"),
-        noteEn = "Russian- and Ukrainian-language library",
-        noteRu = "Русскоязычная и украинская библиотека"
-    ),
-    Catalog(
-        "unglue.it",
-        "Книги під вільними ліцензіями",
-        listOf("https://unglue.it/api/opds/"),
-        noteEn = "Books under free licenses",
-        noteRu = "Книги под свободными лицензиями"
-    )
-)
-
-private object CustomStore {
-    private const val PREFS = "allbooks"
-    private const val KEY = "custom_catalogs"
-
-    fun load(c: Context): List<Catalog> {
-        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
-        return raw.lines().mapNotNull { line ->
-            // Формат: назва|адреса|логін|пароль. Старі записи без логіна/пароля теж читаються.
-            val parts = line.split('|')
-            if (parts.size < 2 || parts[0].isBlank()) null
-            else {
-                val url = parts[1]
-                Catalog(
-                    parts[0], url, listOf(url),
-                    user = parts.getOrNull(2) ?: "",
-                    // Пароль зберігається зашифрованим (SecretBox); старі
-                    // незашифровані значення читаються як є.
-                    pass = SecretBox.decrypt(parts.getOrNull(3) ?: "")
-                )
-            }
-        }
-    }
-
-    fun save(c: Context, list: List<Catalog>) {
-        val raw = list.joinToString("\n") {
-            val clean = { s: String -> s.replace("|", " ").replace("\n", " ").trim() }
-            clean(it.name) + "|" + clean(it.urls.first()) + "|" + clean(it.user) + "|" + SecretBox.encrypt(it.pass)
-        }
-        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY, raw).apply()
-    }
-}
-
-/** Логін/пароль для каталогів окремо від їх списку: вбудовані каталоги
- *  теж можуть попросити авторизацію (401), а їх редагувати не можна. */
-private object AuthStore {
-    private const val PREFS = "allbooks"
-    private const val KEY = "catalog_auth"
-
-    fun load(c: Context): Map<String, Pair<String, String>> {
-        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "") ?: ""
-        val map = mutableMapOf<String, Pair<String, String>>()
-        raw.lines().forEach { line ->
-            val parts = line.split('|')
-            if (parts.size >= 3 && parts[0].isNotBlank()) {
-                // Пароль зберігається зашифрованим (SecretBox); старі
-                // незашифровані значення читаються як є.
-                map[parts[0]] = parts[1] to SecretBox.decrypt(parts[2])
-            }
-        }
-        return map
-    }
-
-    fun save(c: Context, map: Map<String, Pair<String, String>>) {
-        val raw = map.entries.joinToString("\n") { (name, up) ->
-            val clean = { s: String -> s.replace("|", " ").replace("\n", " ").trim() }
-            clean(name) + "|" + clean(up.first) + "|" + SecretBox.encrypt(up.second)
-        }
-        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY, raw).apply()
-    }
-}
-
-private fun searchUrlFor(template: String, term: String): String {
-    val enc = URLEncoder.encode(term, "UTF-8")
-    return template.replace("{searchTerms}", enc).replace("%7BsearchTerms%7D", enc)
-}
-
-/** Одна секція результатів глобального пошуку: каталог і його книги. */
-private data class GlobalSection(
-    val catalog: Catalog,
-    val template: String?,
-    val entries: List<Entry>,
-    val error: String? = null
-)
 
 /** Шукає адресу сторінки з книгами автора: пов'язане посилання, uri автора або пошук. */
 private fun authorTarget(a: Author, e: Entry, searchTemplate: String?): String? {
@@ -297,6 +174,15 @@ private fun themeIsDark(theme: String): Boolean = when (theme) {
 @Composable
 fun CatalogScreen() {
     val context = LocalContext.current
+    val vm: CatalogViewModel = viewModel()
+    val uiState by vm.uiState.collectAsState()
+    val currentCatalog by vm.currentCatalog.collectAsState()
+    val custom by vm.customCatalogs.collectAsState()
+    val selected by vm.selectedBook.collectAsState()
+    val globalSearch by vm.globalSearch.collectAsState()
+    val selectedBookTemplate by vm.selectedBookTemplate.collectAsState()
+    val newIds by vm.newIds.collectAsState()
+    val showAuth by vm.authRequired.collectAsState()
     var settings by remember { mutableStateOf(SettingsStore.load(context)) }
     var languagePref by remember { mutableStateOf(LanguageStore.load(context)) }
     val lang = AppLanguages.resolve(languagePref)
@@ -306,41 +192,14 @@ fun CatalogScreen() {
     var showMyBooks by remember { mutableStateOf(false) }
     var readingBook by remember { mutableStateOf<ReaderBook?>(null) }
     var showSubscriptions by remember { mutableStateOf(false) }
-    var subsVersion by remember { mutableIntStateOf(0) }
-    var newIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var editingCatalog by remember { mutableStateOf<Catalog?>(null) }
     var showMenu by remember { mutableStateOf(false) }
-    var currentCatalog by remember { mutableStateOf<Catalog?>(null) }
-    val history = remember { mutableStateListOf<List<String>>() }
-    val current = history.lastOrNull()
-    var feed by remember { mutableStateOf<Feed?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var reloadKey by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
     var searchExpanded by remember { mutableStateOf(false) }
-    var globalQuery by remember { mutableStateOf("") }
-    var globalSearching by remember { mutableStateOf(false) }
-    var globalSections by remember { mutableStateOf<List<GlobalSection>>(emptyList()) }
-    var globalDone by remember { mutableStateOf(false) }
-    var globalBookCatalog by remember { mutableStateOf<Catalog?>(null) }
-    var globalBookTemplate by remember { mutableStateOf<String?>(null) }
     val searchFocus = remember { FocusRequester() }
-    var custom by remember { mutableStateOf(CustomStore.load(context)) }
-    var catalogAuth by remember { mutableStateOf(AuthStore.load(context)) }
-    var showAuth by remember { mutableStateOf(false) }
     var showAdd by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<Entry?>(null) }
-    var startOpened by remember { mutableStateOf(false) }
     var folderSetupDismissed by remember { mutableStateOf(false) }
     var folderDraft by remember { mutableStateOf(settings.downloadFolder) }
-
-    // Логін/пароль для поточного каталогу: свої поля у власного каталогу,
-    // інакше збережені окремо в AuthStore (вбудовані теж можуть дати 401).
-    val credUser = currentCatalog?.user?.takeIf { it.isNotBlank() }
-        ?: currentCatalog?.name?.let { catalogAuth[it]?.first }
-    val credPass = if (currentCatalog?.user?.isNotBlank() == true) currentCatalog?.pass
-    else currentCatalog?.name?.let { catalogAuth[it]?.second }
 
     // Дозвіл на запис файлів (Android 12 і старіше; на 13+ його вже нема —
     // доступ дає вибір папки через файловий менеджер). Питаємо раз при запуску.
@@ -390,20 +249,6 @@ fun CatalogScreen() {
         }
     }
 
-    // Стартова сторінка: відкрити вибраний каталог одразу при запуску.
-    LaunchedEffect(settings.startCatalog) {
-        if (!startOpened && history.isEmpty()) {
-            startOpened = true
-            val name = settings.startCatalog
-            if (name.isNotBlank()) {
-                (CATALOGS + custom).firstOrNull { it.name == name }?.let { c ->
-                    currentCatalog = c
-                    history.add(c.urls)
-                }
-            }
-        }
-    }
-
     LaunchedEffect(searchExpanded) {
         if (searchExpanded) searchFocus.requestFocus()
     }
@@ -412,42 +257,13 @@ fun CatalogScreen() {
         ThemeChoice.set(settings.theme)
     }
 
-    LaunchedEffect(current, reloadKey) {
+    // Нова стрічка — ховаємо поле пошуку в ній (як було при зміні current).
+    LaunchedEffect(uiState.feed) {
         searchExpanded = false
-        val urls = current
-        if (urls == null) {
-            // Додому: прибираємо стару стрічку, щоб лупа і помилки
-            // відкритого каталогу не лишалися на головній.
-            feed = null
-            error = null
-            loading = false
-            return@LaunchedEffect
-        }
-        loading = true
-        error = null
-        feed = null
-        try {
-            feed = withContext(Dispatchers.IO) {
-                val client = Net.buildClient(settings)
-                val r = Net.fetchFirst(client, urls, credUser, credPass)
-                OpdsParser.parse(ByteArrayInputStream(r.bytes), r.url)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = if (e.message == "Немає жодної адреси") s.noAddress else e.message ?: e.javaClass.simpleName
-            AppLog.d("Feed error: ${e.message}")
-            if (e.message?.startsWith("HTTP 401") == true) showAuth = true
-        }
-        loading = false
     }
 
-    BackHandler(enabled = history.isNotEmpty()) {
-        history.removeAt(history.lastIndex)
-        if (history.isEmpty()) {
-            currentCatalog = null
-            newIds = emptySet()
-        }
+    BackHandler(enabled = uiState.canGoBack || selected != null) {
+        vm.onBack()
     }
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showDownloads) { showDownloads = false }
@@ -460,15 +276,7 @@ fun CatalogScreen() {
             onBack = { showSubscriptions = false },
             onOpen = { url, ids ->
                 showSubscriptions = false
-                selected = null
-                newIds = ids
-                // Підписку відкрили — прочитані «нові» більше не нові.
-                val cleared = SubscriptionsStore.load(context).map {
-                    if (it.url == url) it.copy(newIds = emptySet()) else it
-                }
-                SubscriptionsStore.save(context, cleared)
-                subsVersion++
-                history.add(listOf(url))
+                vm.openSubscription(url, ids)
             }
         )
         return
@@ -512,33 +320,13 @@ fun CatalogScreen() {
         )
         return
     }
-    BackHandler(enabled = selected != null) {
-        selected = null
-        globalBookCatalog = null
-        globalBookTemplate = null
-    }
-
     if (showAdd || editingCatalog != null) {
         CatalogDialog(
             s = s,
             initial = editingCatalog,
             onDismiss = { showAdd = false; editingCatalog = null },
             onSave = { name, url, user, pass ->
-                var u = url.trim()
-                if (u.isNotEmpty() && !u.startsWith("http", ignoreCase = true)) {
-                    u = "https://$u"
-                }
-                val n = name.replace("|", " ").replace("\n", " ").trim().ifEmpty { u }
-                if (u.length > 8) {
-                    val cat = Catalog(n, u, listOf(u), user.trim(), pass)
-                    val old = editingCatalog
-                    if (old != null) {
-                        custom = custom.map { if (it == old) cat else it }
-                        if (currentCatalog == old) currentCatalog = cat
-                    } else {
-                        custom = custom + cat
-                    }
-                    CustomStore.save(context, custom)
+                if (vm.saveCustomCatalog(name, url, user, pass, editingCatalog) != null) {
                     showAdd = false
                     editingCatalog = null
                 }
@@ -547,27 +335,14 @@ fun CatalogScreen() {
     }
 
     if (showAuth && currentCatalog != null) {
+        val (authUser, authPass) = vm.detailCreds()
         AuthDialog(
             s = s,
             catalogName = currentCatalog!!.name,
-            initialUser = credUser ?: "",
-            initialPass = credPass ?: "",
-            onDismiss = { showAuth = false },
-            onSave = { user, pass ->
-                val cat = currentCatalog!!
-                if (custom.any { it.name == cat.name && it.urls == cat.urls }) {
-                    val updated = cat.copy(user = user, pass = pass)
-                    custom = custom.map { if (it.name == cat.name && it.urls == cat.urls) updated else it }
-                    CustomStore.save(context, custom)
-                    currentCatalog = updated
-                } else {
-                    catalogAuth = catalogAuth + (cat.name to (user to pass))
-                    AuthStore.save(context, catalogAuth)
-                }
-                AppLog.d("Auth saved for ${cat.name}")
-                showAuth = false
-                reloadKey++
-            }
+            initialUser = authUser ?: "",
+            initialPass = authPass ?: "",
+            onDismiss = { vm.dismissAuth() },
+            onSave = { user, pass -> vm.saveAuth(user, pass) }
         )
     }
 
@@ -611,79 +386,19 @@ fun CatalogScreen() {
 
     val sel = selected
     val scope = rememberCoroutineScope()
-    val subs = remember(subsVersion) { SubscriptionsStore.load(context) }
+    val subs by vm.subscriptions.collectAsState()
     val isSubscribed = { url: String -> subs.any { it.url == url } }
-
-    // Логін/пароль довільного каталогу: свої поля у власного,
-    // інакше збережені окремо в AuthStore (для вбудованих).
-    fun credsFor(cat: Catalog): Pair<String?, String?> {
-        val u = cat.user.takeIf { it.isNotBlank() } ?: catalogAuth[cat.name]?.first
-        val p = if (cat.user.isNotBlank()) cat.pass else catalogAuth[cat.name]?.second
-        return u to p
-    }
-
-    // Глобальний пошук: питаємо всі каталоги паралельно. У кожного свій
-    // шаблон пошуку (беремо з кореневої стрічки каталогу), тому спочатку
-    // вантажимо корінь, потім — пошук за шаблоном.
-    fun submitGlobalSearch() {
-        val q = globalQuery.trim()
-        if (q.isEmpty() || globalSearching) return
-        globalSearching = true
-        globalDone = false
-        scope.launch {
-            val catalogs = CATALOGS + custom
-            val sections = withContext(Dispatchers.IO) {
-                coroutineScope {
-                    catalogs.map { cat ->
-                        async {
-                            try {
-                                val client = Net.buildClient(settings)
-                                val (u, p) = credsFor(cat)
-                                val root = Net.fetchFirst(client, cat.urls, u, p)
-                                val rootFeed = OpdsParser.parse(
-                                    ByteArrayInputStream(root.bytes), root.url
-                                )
-                                val template = rootFeed.searchUrl ?: return@async null
-                                val sr = Net.fetchFirst(
-                                    client, listOf(searchUrlFor(template, q)), u, p
-                                )
-                                val sfeed = OpdsParser.parse(
-                                    ByteArrayInputStream(sr.bytes), sr.url
-                                )
-                                GlobalSection(cat, template, sfeed.entries)
-                            } catch (e: Exception) {
-                                AppLog.d("Global search failed for ${cat.name}: ${e.message}")
-                                GlobalSection(cat, null, emptyList(), e.message)
-                            }
-                        }
-                    }.awaitAll().filterNotNull()
-                }
-            }
-            globalSections = sections
-            globalSearching = false
-            globalDone = true
-        }
-    }
 
     // Для сторінки книги: якщо її відкрито з глобального пошуку —
     // шаблон пошуку і логін/пароль її каталогу, інакше — поточної стрічки.
-    val detailTemplate = globalBookTemplate ?: feed?.searchUrl
-    val detailUser = globalBookCatalog?.let { credsFor(it).first } ?: credUser
-    val detailPass = globalBookCatalog?.let { credsFor(it).second } ?: credPass
+    val detailTemplate = selectedBookTemplate ?: uiState.feed?.searchUrl
+    val (detailUser, detailPass) = vm.detailCreds()
 
     // Додому: список каталогів, як у старої програми.
     fun goHome() {
-        history.clear()
-        currentCatalog = null
-        selected = null
-        newIds = emptySet()
+        vm.goHome()
         query = ""
         searchExpanded = false
-        globalQuery = ""
-        globalSections = emptyList()
-        globalDone = false
-        globalBookCatalog = null
-        globalBookTemplate = null
     }
 
     // Підписка: зберігаємо поточний список книг як базу, щоб новими
@@ -691,7 +406,7 @@ fun CatalogScreen() {
     fun toggleSubscription(type: String, name: String, url: String, user: String?, pass: String?) {
         if (isSubscribed(url)) {
             SubscriptionsStore.save(context, subs.filterNot { it.url == url })
-            subsVersion++
+            vm.refreshSubscriptions()
             Toast.makeText(context, s.unsubscribed, Toast.LENGTH_SHORT).show()
             return
         }
@@ -715,15 +430,15 @@ fun CatalogScreen() {
                     pass = pass ?: ""
                 )
             )
-            subsVersion++
+            vm.refreshSubscriptions()
             Toast.makeText(context, s.subscribed, Toast.LENGTH_SHORT).show()
         }
     }
 
     val title = when {
         sel != null -> sel.title
-        current == null -> s.appNameRunes
-        else -> feed?.title ?: s.loading
+        uiState.isHome -> s.appNameRunes
+        else -> uiState.title ?: s.loading
     }
 
     Scaffold(
@@ -780,17 +495,17 @@ fun CatalogScreen() {
                     }
                 },
                 actions = {
-                    if (current != null || sel != null) {
+                    if (!uiState.isHome || sel != null) {
                         IconButton(onClick = { goHome() }) {
                             Icon(Icons.Filled.Home, contentDescription = s.home)
                         }
                     }
-                    if (sel == null && feed?.searchUrl != null) {
+                    if (sel == null && uiState.feed?.searchUrl != null) {
                         IconButton(onClick = { searchExpanded = !searchExpanded }) {
                             Icon(Icons.Filled.Search, contentDescription = s.search)
                         }
                     }
-                    if (sel == null && feed != null) {
+                    if (sel == null && uiState.feed != null) {
                         IconButton(onClick = {
                             val updated = settings.copy(feedGrid = !settings.feedGrid)
                             settings = updated
@@ -807,7 +522,7 @@ fun CatalogScreen() {
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            val f = feed
+            val f = uiState.feed
             when {
                 sel != null -> {
                 val downloadedBooks = remember(sel) { Reader.downloadedMap(context, settings, s) }
@@ -818,8 +533,7 @@ fun CatalogScreen() {
                     onAuthor = { a ->
                         val target = authorTarget(a, sel, detailTemplate)
                         if (target != null) {
-                            selected = null
-                            history.add(listOf(target))
+                            vm.openUrl(target)
                         } else {
                             Toast.makeText(
                                 context,
@@ -829,8 +543,7 @@ fun CatalogScreen() {
                         }
                     },
                     onSeries = { url ->
-                        selected = null
-                        history.add(listOf(url))
+                        vm.openUrl(url)
                     },
                     onOpenSite = { url ->
                         try {
@@ -867,39 +580,33 @@ fun CatalogScreen() {
                     onReadBook = { rb -> readingBook = rb }
                 )
             }
-                current == null -> Column(Modifier.fillMaxSize()) {
+                uiState.isHome -> Column(Modifier.fillMaxSize()) {
                     OutlinedTextField(
-                        value = globalQuery,
-                        onValueChange = {
-                            globalQuery = it
-                            if (it.isBlank()) {
-                                globalSections = emptyList()
-                                globalDone = false
-                            }
-                        },
+                        value = globalSearch.query,
+                        onValueChange = { vm.setGlobalQuery(it) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         singleLine = true,
                         placeholder = { Text(s.searchAll) },
                         trailingIcon = {
-                            IconButton(onClick = { submitGlobalSearch() }) {
+                            IconButton(onClick = { vm.submitGlobalSearch() }) {
                                 Icon(Icons.Filled.Search, contentDescription = s.search)
                             }
                         },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { submitGlobalSearch() })
+                        keyboardActions = KeyboardActions(onSearch = { vm.submitGlobalSearch() })
                     )
-                    if (globalSearching) {
+                    if (globalSearch.searching) {
                         Box(
                             Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator()
                         }
-                    } else if (globalSections.isNotEmpty() || globalDone) {
+                    } else if (globalSearch.sections.isNotEmpty() || globalSearch.done) {
                         LazyColumn(Modifier.fillMaxSize()) {
-                            if (globalSections.all { it.entries.isEmpty() }) {
+                            if (globalSearch.sections.all { it.entries.isEmpty() }) {
                                 item {
                                     Text(
                                         s.noSearchResults,
@@ -907,7 +614,7 @@ fun CatalogScreen() {
                                     )
                                 }
                             }
-                            globalSections.forEach { section ->
+                            globalSearch.sections.forEach { section ->
                                 if (section.entries.isNotEmpty()) {
                                     item {
                                         Text(
@@ -925,13 +632,10 @@ fun CatalogScreen() {
                                             e = e,
                                             isNew = false,
                                             onBook = {
-                                                selected = e
-                                                globalBookCatalog = section.catalog
-                                                globalBookTemplate = section.template
+                                                vm.selectBook(e, section.catalog, section.template)
                                             },
                                             onOpen = { target ->
-                                                currentCatalog = section.catalog
-                                                history.add(listOf(target))
+                                                vm.openUrl(target, section.catalog)
                                             }
                                         )
                                     }
@@ -943,26 +647,26 @@ fun CatalogScreen() {
                             s = s,
                             lang = lang,
                             custom = custom,
-                            onOpen = { c -> currentCatalog = c; history.add(c.urls) },
-                            onDelete = { c ->
-                                custom = custom - c
-                                CustomStore.save(context, custom)
-                            },
+                            onOpen = { c -> vm.openCatalog(c) },
+                            onDelete = { c -> vm.deleteCustomCatalog(c) },
                             onEdit = { c -> editingCatalog = c }
                         )
                     }
                 }
-                loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                error != null -> Column(
+                uiState.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                uiState.error != null -> Column(
                     Modifier.align(Alignment.Center).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("${s.errorTitle}: $error")
+                    val errText = uiState.error?.let {
+                        if (it == "Немає жодної адреси") s.noAddress else it
+                    }
+                    Text("${s.errorTitle}: $errText")
                     Spacer(Modifier.height(12.dp))
-                    Button(onClick = { reloadKey++ }) { Text(s.retry) }
-                    if (error?.startsWith("HTTP 401") == true && currentCatalog != null) {
+                    Button(onClick = { vm.reload() }) { Text(s.retry) }
+                    if (uiState.error?.startsWith("HTTP 401") == true && currentCatalog != null) {
                         Spacer(Modifier.height(8.dp))
-                        TextButton(onClick = { showAuth = true }) { Text(s.enterLogin) }
+                        TextButton(onClick = { vm.requestAuth() }) { Text(s.enterLogin) }
                     }
                 }
                 f != null -> Column(Modifier.fillMaxSize()) {
@@ -1002,7 +706,7 @@ fun CatalogScreen() {
                                 keyboardActions = KeyboardActions(onSearch = {
                                     val q = query.trim()
                                     if (q.isNotEmpty()) {
-                                        history.add(listOf(searchUrlFor(template, q)))
+                                        vm.openUrl(searchUrlFor(template, q))
                                     }
                                 })
                             )
@@ -1013,9 +717,9 @@ fun CatalogScreen() {
                             s = s,
                             feed = f,
                             newIds = newIds,
-                            onBook = { selected = it },
-                            onOpen = { target -> history.add(listOf(target)) },
-                            onNext = { next -> history.add(listOf(next)) }
+                            onBook = { vm.selectBook(it) },
+                            onOpen = { target -> vm.openUrl(target) },
+                            onNext = { next -> vm.openUrl(next) }
                         )
                     } else {
                         LazyColumn(Modifier.fillMaxSize()) {
@@ -1024,14 +728,14 @@ fun CatalogScreen() {
                                     s = s,
                                     e = e,
                                     isNew = newIds.contains(e.id),
-                                    onBook = { selected = e },
-                                    onOpen = { target -> history.add(listOf(target)) }
+                                    onBook = { vm.selectBook(e) },
+                                    onOpen = { target -> vm.openUrl(target) }
                                 )
                             }
                             f.nextUrl?.let { next ->
                                 item {
                                     TextButton(
-                                        onClick = { history.add(listOf(next)) },
+                                        onClick = { vm.openUrl(next) },
                                         modifier = Modifier.padding(8.dp)
                                     ) { Text(s.nextPage) }
                                 }
