@@ -107,6 +107,9 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
     private val _newIds = MutableStateFlow<Set<String>>(emptySet())
     val newIds: StateFlow<Set<String>> = _newIds.asStateFlow()
 
+    private val _favourites = MutableStateFlow<List<Favourite>>(emptyList())
+    val favourites: StateFlow<List<Favourite>> = _favourites.asStateFlow()
+
     private val _authRequired = MutableStateFlow(false)
     val authRequired: StateFlow<Boolean> = _authRequired.asStateFlow()
 
@@ -123,6 +126,7 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refreshSubscriptions()
+        refreshFavourites()
         // Стартова сторінка: відкрити вибраний каталог одразу при запуску.
         val name = SettingsStore.load(context).startCatalog
         if (name.isNotBlank()) {
@@ -132,6 +136,47 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshSubscriptions() {
         _subscriptions.value = SubscriptionsStore.load(context)
+    }
+
+    fun refreshFavourites() {
+        _favourites.value = FavouritesStore.load(context)
+    }
+
+    /** Додати книгу в закладки або прибрати її звідти. */
+    fun toggleFavourite(entry: Entry) {
+        val catalog = _selectedBookCatalog.value ?: _currentCatalog.value
+        val list = FavouritesStore.load(context).toMutableList()
+        val idx = list.indexOfFirst { it.entry.id == entry.id }
+        if (idx >= 0) {
+            list.removeAt(idx)
+        } else {
+            list.add(
+                0,
+                Favourite(
+                    entry,
+                    catalog?.name ?: "",
+                    catalog?.urls?.firstOrNull() ?: ""
+                )
+            )
+        }
+        FavouritesStore.save(context, list)
+        _favourites.value = list
+    }
+
+    /** Прибрати закладку зі списку (кнопка «✕» на екрані закладок). */
+    fun removeFavourite(fav: Favourite) {
+        val list = FavouritesStore.load(context)
+            .filter { it.entry.id != fav.entry.id }
+        FavouritesStore.save(context, list)
+        _favourites.value = list
+    }
+
+    /** Відкрити закладку: знайти її каталог і показати сторінку книги. */
+    fun openFavourite(fav: Favourite) {
+        val catalog = (CATALOGS + _customCatalogs.value)
+            .firstOrNull { it.urls.firstOrNull() == fav.catalogUrl }
+            ?: _currentCatalog.value
+        selectBook(fav.entry, catalog)
     }
 
     /** Логін/пароль каталогу: свої поля у власного, інакше збережені окремо в AuthStore. */

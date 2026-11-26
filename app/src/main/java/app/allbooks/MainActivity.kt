@@ -186,6 +186,7 @@ fun CatalogScreen() {
     val globalSearch by vm.globalSearch.collectAsState()
     val selectedBookTemplate by vm.selectedBookTemplate.collectAsState()
     val newIds by vm.newIds.collectAsState()
+    val favs by vm.favourites.collectAsState()
     val showAuth by vm.authRequired.collectAsState()
     val batchState by vm.batchState.collectAsState()
     var settings by remember { mutableStateOf(SettingsStore.load(context)) }
@@ -197,6 +198,7 @@ fun CatalogScreen() {
     var showMyBooks by remember { mutableStateOf(false) }
     var readingBook by remember { mutableStateOf<ReaderBook?>(null) }
     var showSubscriptions by remember { mutableStateOf(false) }
+    var showFavourites by remember { mutableStateOf(false) }
     var editingCatalog by remember { mutableStateOf<Catalog?>(null) }
     var showMenu by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -289,6 +291,7 @@ fun CatalogScreen() {
     BackHandler(enabled = showDownloads) { showDownloads = false }
     BackHandler(enabled = showMyBooks) { showMyBooks = false }
     BackHandler(enabled = showSubscriptions) { showSubscriptions = false }
+    BackHandler(enabled = showFavourites) { showFavourites = false }
     // Читалка — найвищий шар: її можна відкрити з будь-якого екрана
     // («Читати» у «Моїх книгах»), тому перевіряється першою. Інакше
     // onRead ставив readingBook, але екран лишався старим, і читалка
@@ -311,6 +314,19 @@ fun CatalogScreen() {
                 showSubscriptions = false
                 vm.openSubscription(url, ids)
             }
+        )
+        return
+    }
+    if (showFavourites) {
+        FavouritesScreen(
+            s = s,
+            favourites = favs,
+            onBack = { showFavourites = false },
+            onOpen = { fav ->
+                showFavourites = false
+                vm.openFavourite(fav)
+            },
+            onRemove = { fav -> vm.removeFavourite(fav) }
         )
         return
     }
@@ -567,6 +583,10 @@ fun CatalogScreen() {
                                 onClick = { showMenu = false; showSubscriptions = true }
                             )
                             DropdownMenuItem(
+                                text = { Text(s.favourites) },
+                                onClick = { showMenu = false; showFavourites = true }
+                            )
+                            DropdownMenuItem(
                                 text = { Text(s.settings) },
                                 onClick = { showMenu = false; showSettings = true }
                             )
@@ -656,6 +676,8 @@ fun CatalogScreen() {
                         }
                     },
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
+                    onToggleFavourite = { vm.toggleFavourite(sel) },
+                    isFavourite = favs.any { it.entry.id == sel.id },
                     onDownload = { link -> Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri) },
                     onRead = readBook?.let { rb -> { readingBook = rb } },
                     downloadedBooks = downloadedBooks,
@@ -903,6 +925,8 @@ private fun BookDetail(
     isAuthorSubscribed: (Author) -> Boolean,
     onToggleSeries: () -> Unit,
     isSeriesSubscribed: Boolean,
+    onToggleFavourite: () -> Unit,
+    isFavourite: Boolean,
     onDownload: (Link) -> Unit,
     onRead: (() -> Unit)? = null,
     downloadedBooks: Map<String, MyBook> = emptyMap(),
@@ -1000,6 +1024,9 @@ private fun BookDetail(
                             Text(if (isAuthorSubscribed(a)) "✓" else "+")
                         }
                     }
+                }
+                TextButton(onClick = onToggleFavourite) {
+                    Text(if (isFavourite) s.removeFavourite else s.addFavourite)
                 }
             }
         }
