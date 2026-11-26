@@ -148,7 +148,7 @@ object Net {
             try {
                 val reqBuilder = Request.Builder()
                     .url(u)
-                    .header("User-Agent", "AllBooks/2.0 (Android)")
+                    .header("User-Agent", "BookMriya/2.0 (Android)")
                 if (!user.isNullOrBlank()) {
                     reqBuilder.header("Authorization", Credentials.basic(user, pass ?: ""))
                 }

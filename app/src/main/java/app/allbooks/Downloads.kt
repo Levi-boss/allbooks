@@ -3,6 +3,7 @@ package app.allbooks
 import android.app.DownloadManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
@@ -10,11 +11,14 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
 import app.allbooks.net.Net
 import app.allbooks.net.NetSettings
+import app.allbooks.net.ProxyMode
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Link
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +27,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okhttp3.Credentials
 import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 
 data class DownloadItem(
@@ -60,8 +66,8 @@ object Downloads {
     // логін, пароль, тип ("dm" або "saf") (\u0001 — роздільник).
     private const val META_PREFIX = "meta_"
 
-    // Стан завантажень у папку, вибрану через файловий менеджер (SAF):
-    // "item_<id>" = назва|ім'я файлу|статус|завантажено|всього|адреса документа.
+    // Стан ручних завантажень (SAF-папка і OkHttp у загальну папку
+    // Завантаження): "item_<id>" = назва|ім'я файлу|статус|завантажено|всього|адреса документа.
     private const val SAF_PREFS = "allbooks_saf_downloads"
     private const val SAF_ITEM_PREFIX = "item_"
 
@@ -77,15 +83,21 @@ object Downloads {
             .putString(KEY, ids.joinToString("\n")).apply()
     }
 
-    private fun saveMeta(c: Context, id: Long, meta: String) {
+    // Пароль каталогу (поле 5) зберігається зашифрованим (SecretBox);
+    // старі незашифровані значення читаються як є.
+    private fun saveMeta(c: Context, id: Long, parts: List<String>) {
+        val safe = parts.toMutableList()
+        if (safe.size > 5) safe[5] = SecretBox.encrypt(safe[5])
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(META_PREFIX + id, meta).apply()
+            .putString(META_PREFIX + id, safe.joinToString("\u0001")).apply()
     }
 
     private fun readMeta(c: Context, id: Long): List<String>? {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(META_PREFIX + id, null) ?: return null
-        return raw.split('\u0001')
+        val parts = raw.split('\u0001').toMutableList()
+        if (parts.size > 5) parts[5] = SecretBox.decrypt(parts[5])
+        return parts
     }
 
     private fun clearMeta(c: Context, id: Long) {
@@ -202,11 +214,16 @@ object Downloads {
             .take(80)
             .ifEmpty { "book" }
         val name = "$safe.${extension(link)}"
-        AppLog.d("Download start: $name (${link.format}) via ${if (safFolderUri.isNotBlank()) "saf" else "dm"}")
+        val via = when {
+            safFolderUri.isNotBlank() -> "saf"
+            settings.proxyMode != ProxyMode.NONE || settings.useDoh -> "okhttp"
+            else -> "dm"
+        }
+        AppLog.d("Download start: $name (${link.format}) via $via")
         if (safFolderUri.isNotBlank()) {
             startSaf(context, link.href, entry.title, name, safFolderUri, user, pass, settings, s)
         } else {
-            enqueue(context, link.href, entry.title, name, folder, user, pass, s)
+            enqueue(context, link.href, entry.title, name, folder, user, pass, s, settings)
         }
     }
 
@@ -224,19 +241,45 @@ object Downloads {
         val user = meta.getOrNull(4)?.ifEmpty { null }
         val pass = meta.getOrNull(5)?.ifEmpty { null }
         val kind = meta.getOrNull(6) ?: "dm"
+        val settings = SettingsStore.load(context)
         remove(context, id)
         if (kind == "saf") {
-            startSaf(context, url, title, name, folder, user, pass, SettingsStore.load(context), s)
+            startSaf(context, url, title, name, folder, user, pass, settings, s)
+        } else if (kind == "okhttp") {
+            startOkHttp(context, url, title, name, folder, user, pass, settings, s)
         } else {
-            enqueue(context, url, title, name, folder, user, pass, s)
+            enqueue(context, url, title, name, folder, user, pass, s, settings)
         }
     }
 
-    private fun enqueue(context: Context, url: String, title: String, name: String, folder: String, user: String?, pass: String?, s: AppStrings) {
+    /** Завислі записи ручних завантажень (SAF і OkHttp): процес загинув,
+     *  поки завантаження висіло зі статусом RUNNING/PENDING. Переводимо
+     *  їх у FAILED, щоб користувач міг повторити їх зі списку (метадані
+     *  збережені, canRetry = true). Викликається при запуску застосунку. */
+    fun failStale(context: Context) {
+        val appContext = context.applicationContext
+        listSafItems(appContext)
+            .filter {
+                it.status == DownloadManager.STATUS_RUNNING ||
+                    it.status == DownloadManager.STATUS_PENDING
+            }
+            .forEach { item ->
+                saveSafItem(appContext, item.copy(status = DownloadManager.STATUS_FAILED))
+                cancelSafNotification(appContext, item.id)
+            }
+    }
+
+    private fun enqueue(context: Context, url: String, title: String, name: String, folder: String, user: String?, pass: String?, s: AppStrings, settings: NetSettings = NetSettings()) {
         val cleanFolder = folder
             .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
             .trim()
             .ifEmpty { "BookMriya" }
+        // Системний DownloadManager не знає про проксі та DoH застосунку:
+        // з ними качаємо самі через OkHttp і пишемо в загальну папку Завантаження.
+        if (settings.proxyMode != ProxyMode.NONE || settings.useDoh) {
+            startOkHttp(context, url, title, name, cleanFolder, user, pass, settings, s)
+            return
+        }
         try {
             val req = DownloadManager.Request(Uri.parse(url))
                 .setTitle(title)
@@ -257,12 +300,141 @@ object Downloads {
             saveMeta(
                 context, id,
                 listOf(url, title, name, cleanFolder, user ?: "", pass ?: "", "dm")
-                    .joinToString("\u0001")
             )
             Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             AppLog.d("Download failed (dm): $name: ${e.message}")
             Toast.makeText(context, "${s.errorTitle}: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Завантаження у загальну папку Завантаження через OkHttp (клієнт
+     * застосунку — з проксі та DoH). Android 10+: пишемо в
+     * MediaStore.Downloads; старіше — звичайним файлом у публічну
+     * папку Завантаження. Стан зберігається, як у SAF-завантажень,
+     * тому запис видно в списку, його можна відкрити, повторити і видалити.
+     */
+    private fun startOkHttp(
+        context: Context,
+        url: String,
+        title: String,
+        name: String,
+        folder: String,
+        user: String?,
+        pass: String?,
+        settings: NetSettings,
+        s: AppStrings
+    ) {
+        val appContext = context.applicationContext
+        var id = System.currentTimeMillis()
+        while (readSafItem(appContext, id) != null) id++
+        val item = DownloadItem(
+            id = id, title = title, fileName = name,
+            status = DownloadManager.STATUS_RUNNING,
+            downloaded = 0L, total = -1L, canRetry = true
+        )
+        saveSafItem(appContext, item)
+        saveMeta(
+            appContext, id,
+            listOf(url, title, name, folder, user ?: "", pass ?: "", "okhttp")
+        )
+        showSafNotification(appContext, s, item)
+        Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+        safScope.launch {
+            var downloaded = 0L
+            var total = -1L
+            var docUri: Uri? = null
+            var targetFile: File? = null
+            var lastSave = 0L
+            fun saveProgress(status: Int) {
+                val cur = item.copy(
+                    status = status, downloaded = downloaded, total = total,
+                    safDocUri = docUri?.toString() ?: ""
+                )
+                saveSafItem(appContext, cur)
+                showSafNotification(appContext, s, cur)
+            }
+            try {
+                val reqBuilder = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "BookMriya/2.0 (Android)")
+                if (!user.isNullOrBlank()) {
+                    reqBuilder.header("Authorization", Credentials.basic(user, pass ?: ""))
+                }
+                val client = Net.buildClient(settings)
+                client.newCall(reqBuilder.build()).execute().use { resp ->
+                    if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                    val body = resp.body ?: throw IOException("empty body")
+                    total = body.contentLength()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, name)
+                            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                            put(MediaStore.Downloads.RELATIVE_PATH, "Download/$folder")
+                        }
+                        docUri = appContext.contentResolver.insert(
+                            MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                        ) ?: throw IOException("MediaStore insert returned null")
+                        appContext.contentResolver.openOutputStream(docUri!!)?.use { out ->
+                            body.byteStream().use { input ->
+                                val buf = ByteArray(8192)
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    downloaded += n
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastSave > 500) {
+                                        lastSave = now
+                                        saveProgress(DownloadManager.STATUS_RUNNING)
+                                    }
+                                }
+                                out.flush()
+                            }
+                        } ?: throw IOException("cannot open output stream")
+                    } else {
+                        val dir = File(
+                            Environment.getExternalStoragePublicDirectory(
+                                Environment.DIRECTORY_DOWNLOADS
+                            ), folder
+                        )
+                        if (!dir.exists()) dir.mkdirs()
+                        targetFile = File(dir, name)
+                        FileOutputStream(targetFile!!).use { out ->
+                            body.byteStream().use { input ->
+                                val buf = ByteArray(8192)
+                                while (true) {
+                                    val n = input.read(buf)
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    downloaded += n
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastSave > 500) {
+                                        lastSave = now
+                                        saveProgress(DownloadManager.STATUS_RUNNING)
+                                    }
+                                }
+                                out.flush()
+                            }
+                        }
+                        docUri = FileProvider.getUriForFile(
+                            appContext, "app.allbooks.fileprovider", targetFile!!
+                        )
+                    }
+                }
+                saveProgress(DownloadManager.STATUS_SUCCESSFUL)
+            } catch (e: Exception) {
+                AppLog.d("Download failed (okhttp): $name: ${e.message}")
+                if (docUri != null) {
+                    try {
+                        appContext.contentResolver.delete(docUri!!, null, null)
+                    } catch (ignored: Exception) {
+                    }
+                }
+                targetFile?.delete()
+                saveProgress(DownloadManager.STATUS_FAILED)
+            }
         }
     }
 
@@ -294,7 +466,6 @@ object Downloads {
         saveMeta(
             appContext, id,
             listOf(url, title, name, folderUri, user ?: "", pass ?: "", "saf")
-                .joinToString("\u0001")
         )
         showSafNotification(appContext, s, item)
         Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
@@ -404,9 +575,27 @@ object Downloads {
         if (safItem != null) {
             if (safItem.safDocUri.isNotBlank()) {
                 try {
-                    DocumentsContract.deleteDocument(
-                        context.contentResolver, Uri.parse(safItem.safDocUri)
-                    )
+                    val uri = Uri.parse(safItem.safDocUri)
+                    when (uri.authority) {
+                        // Файл з MediaStore (OkHttp-завантаження, Android 10+).
+                        "media" -> context.contentResolver.delete(uri, null, null)
+                        // Звичайний файл у папці Завантаження (OkHttp, старіше
+                        // Android 10): FileProvider не видаляє, стираємо файл
+                        // напряму за метаданими (папка/ім'я).
+                        "app.allbooks.fileprovider" -> {
+                            val meta = readMeta(context, id)
+                            if (meta != null && meta.size >= 4) {
+                                File(
+                                    Environment.getExternalStoragePublicDirectory(
+                                        Environment.DIRECTORY_DOWNLOADS
+                                    ), "${meta[3]}/${meta[2]}"
+                                ).delete()
+                            }
+                        }
+                        else -> DocumentsContract.deleteDocument(
+                            context.contentResolver, uri
+                        )
+                    }
                 } catch (e: Exception) {
                     // ігноруємо — головне прибрати зі списку
                 }
