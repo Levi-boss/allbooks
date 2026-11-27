@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
         // можна було повторити зі списку.
         Downloads.failStale(this)
         ThemeChoice.set(SettingsStore.load(this).theme)
-        ThemeChoice.setAmoled(SettingsStore.load(this).amoled)
+        ThemeChoice.setAmoledMode(SettingsStore.load(this).amoled)
         // Фонова перевірка підписок (раз на день), якщо сповіщення ввімкнено.
         if (SettingsStore.load(this).notifyNewBooks) {
             SubCheckScheduler.schedule(this)
@@ -169,7 +169,7 @@ object ThemeChoice {
         theme = t
     }
 
-    fun setAmoled(v: Boolean) {
+    fun setAmoledMode(v: Boolean) {
         amoled = v
     }
 }
@@ -274,7 +274,7 @@ fun CatalogScreen() {
     }
 
     LaunchedEffect(settings.amoled) {
-        ThemeChoice.setAmoled(settings.amoled)
+        ThemeChoice.setAmoledMode(settings.amoled)
     }
 
     // Нова стрічка — ховаємо поле пошуку в ній (як було при зміні current).
