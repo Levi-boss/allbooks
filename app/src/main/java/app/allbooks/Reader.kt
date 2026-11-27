@@ -6,18 +6,23 @@ import android.net.Uri
 import android.util.Xml
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,7 +62,10 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipInputStream
 
 /**
@@ -167,6 +175,10 @@ object Reader {
                     }
                     if (blocks.isNullOrEmpty()) null else blocks
                 }
+            } catch (e: OutOfMemoryError) {
+                // Велика книга: показати «не вдалося прочитати» замість краху.
+                AppLog.d("Reader load OOM: ${book.fileName}")
+                null
             } catch (e: Exception) {
                 AppLog.d("Reader load failed: ${book.fileName}: ${e.message}")
                 null
@@ -318,12 +330,24 @@ object Reader {
 
     // --- EPUB: container.xml → OPF (manifest + spine) → глави XHTML. ---
 
+    // Текстові записи архіву: тільки їх читаємо в пам'ять. Картинки,
+    // шрифти, CSS і медіа пропускаємо — інакше EPUB на 30+ МБ з
+    // картинками вантажить всю пам'ять.
+    private fun isEpubTextEntry(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower.endsWith(".xml") || lower.endsWith(".opf") ||
+            lower.endsWith(".ncx") || lower.endsWith(".xhtml") ||
+            lower.endsWith(".html") || lower.endsWith(".htm")
+    }
+
     private fun parseEpub(stream: InputStream): List<Block> {
         val entries = mutableMapOf<String, ByteArray>()
         ZipInputStream(stream).use { zip ->
             var e = zip.nextEntry
             while (e != null) {
-                if (!e.isDirectory) entries[e.name] = zip.readBytes()
+                if (!e.isDirectory && isEpubTextEntry(e.name)) {
+                    entries[e.name] = zip.readBytes()
+                }
                 zip.closeEntry()
                 e = zip.nextEntry
             }
@@ -421,7 +445,10 @@ object Reader {
                         skipDepth > 0 || inHead -> {}
                         name == "br" -> out.br()
                         headingLevel(name) != null -> out.startHeading(headingLevel(name)!!)
-                        name == "p" -> out.startPara()
+                        // Блочні теги без <p> всередині (div, li, blockquote)
+                        // теж дають абзац, інакше книга виходить порожньою.
+                        name == "p" || name == "div" || name == "li" ||
+                            name == "blockquote" -> out.startPara()
                     }
                 }
                 XmlPullParser.TEXT -> if (skipDepth == 0 && !inHead) out.text(parser.text)
@@ -432,7 +459,9 @@ object Reader {
                         name == "script" || name == "style" ->
                             skipDepth = (skipDepth - 1).coerceAtLeast(0)
                         skipDepth > 0 || inHead -> {}
-                        headingLevel(name) != null || name == "p" -> out.flush()
+                        headingLevel(name) != null || name == "p" ||
+                            name == "div" || name == "li" ||
+                            name == "blockquote" -> out.flush()
                     }
                 }
             }
@@ -445,7 +474,17 @@ object Reader {
     // --- TXT: абзаци розділені порожніми рядками; перенесені рядки зливаються. ---
 
     private fun parseTxt(stream: InputStream): List<Block> {
-        val text = stream.bufferedReader(Charsets.UTF_8).readText()
+        // Спершу суворий UTF-8; якщо не декодується — windows-1251
+        // (часта для кирилиці), інакше текст нечитабельний.
+        val bytes = stream.readBytes()
+        val text = try {
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            decoder.decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (e: CharacterCodingException) {
+            String(bytes, Charset.forName("windows-1251"))
+        }
         val blocks = mutableListOf<Block>()
         val cur = StringBuilder()
         fun flush() {
@@ -478,18 +517,95 @@ object ReaderStore {
             .putFloat("font_sp", size).apply()
     }
 
-    fun position(c: Context, fileName: String): Pair<Int, Int> {
+    // Ключ позиції: ім'я файлу + розмір, якщо відомий. Дві різні книги
+    // з однаковим іменем більше не ділять одну позицію.
+    private fun posKey(book: ReaderBook): String {
+        val size = book.file?.takeIf { it.exists() }?.length()?.takeIf { it > 0 }
+        return "pos_" + book.fileName + (size?.let { "_$it" } ?: "")
+    }
+
+    fun position(c: Context, book: ReaderBook): Pair<Int, Int> {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString("pos_$fileName", null) ?: return 0 to 0
+            .getString(posKey(book), null) ?: return 0 to 0
         val parts = raw.split(':')
         val index = parts.getOrNull(0)?.toIntOrNull() ?: 0
         val offset = parts.getOrNull(1)?.toIntOrNull() ?: 0
         return index.coerceAtLeast(0) to offset.coerceAtLeast(0)
     }
 
-    fun savePosition(c: Context, fileName: String, index: Int, offset: Int) {
+    fun savePosition(c: Context, book: ReaderBook, index: Int, offset: Int) {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("pos_$fileName", "$index:$offset").apply()
+            .putString(posKey(book), "$index:$offset").apply()
+    }
+
+    /** Закладка читалки: індекс блока + короткий уривок його тексту. */
+    data class Bookmark(val index: Int, val snippet: String)
+
+    // Закладки книги: "bm_<ім'я файлу>" = записи "індекс\u001Fуривок",
+    // розділені \u0001. Уривок — перші 60 символів, без службових знаків.
+    fun bookmarks(c: Context, fileName: String): List<Bookmark> {
+        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("bm_$fileName", null) ?: return emptyList()
+        return raw.split('\u0001').mapNotNull { entry ->
+            val parts = entry.split('\u001F')
+            val index = parts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+            Bookmark(index, parts.getOrNull(1) ?: "")
+        }.sortedBy { it.index }
+    }
+
+    /** Додати/прибрати закладку на блок; повертає true, якщо тепер є. */
+    fun toggleBookmark(c: Context, fileName: String, index: Int, snippet: String): Boolean {
+        val clean = snippet.replace(Regex("[\u0001\u001F\\n\\r]+"), " ").trim().take(60)
+        val cur = bookmarks(c, fileName).toMutableList()
+        val exists = cur.any { it.index == index }
+        if (exists) cur.removeAll { it.index == index }
+        else cur.add(Bookmark(index, clean))
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("bm_$fileName", serializeMarks(cur)).apply()
+        return !exists
+    }
+
+    private fun serializeMarks(marks: List<Bookmark>): String =
+        marks.sortedBy { it.index }
+            .joinToString("\u0001") { "${it.index}\u001F${it.snippet}" }
+
+    /** Усі позиції читання («pos_...» → «індекс:зсув») — для резервної копії. */
+    fun allPositions(c: Context): Map<String, String> {
+        val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.all.mapNotNull { (k, v) ->
+            if (k.startsWith("pos_") && v is String) k to v else null
+        }.toMap()
+    }
+
+    /** Усі закладки читалки (ім'я файлу → список) — для резервної копії. */
+    fun allBookmarks(c: Context): Map<String, List<Bookmark>> {
+        val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.all.keys.mapNotNull { k ->
+            if (!k.startsWith("bm_")) null
+            else k.removePrefix("bm_") to bookmarks(c, k.removePrefix("bm_"))
+        }.toMap()
+    }
+
+    /** Записати позиції, закладки і останню книгу з копії
+     * (імпортовані перемагають). */
+    fun importReader(
+        c: Context,
+        positions: Map<String, String>,
+        bookmarks: Map<String, List<Bookmark>>,
+        lastRead: Pair<String, String>?
+    ) {
+        val edit = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        positions.forEach { (k, v) ->
+            if (k.startsWith("pos_")) edit.putString(k, v)
+        }
+        bookmarks.forEach { (file, marks) ->
+            edit.putString("bm_$file", serializeMarks(marks))
+        }
+        if (lastRead != null) {
+            edit.putString("last_file", lastRead.first)
+            edit.putString("last_name", lastRead.second)
+        }
+        edit.apply()
     }
 
     /** Остання відкрита книга (ім'я файлу + назва) — для «Продовжити читання». */
@@ -532,15 +648,26 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
     var night by remember { mutableStateOf(ReaderStore.night(context)) }
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
-    val savedPos = remember(book) { ReaderStore.position(context, book.fileName) }
+    val savedPos = remember(book) { ReaderStore.position(context, book) }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = savedPos.first,
         initialFirstVisibleItemScrollOffset = savedPos.second
     )
+    var showSheet by remember { mutableStateOf(false) }
+    var markList by remember { mutableStateOf<List<ReaderStore.Bookmark>>(emptyList()) }
+
+    // Заголовки книги (індекс блока + заголовок) — для змісту.
+    val headings = remember(blocks) {
+        blocks?.mapIndexedNotNull { index, block ->
+            if (block is Block.Heading) index to block else null
+        }.orEmpty()
+    }
+    // Чи є закладка на поточному видимому блоці.
+    val currentBookmarked = markList.any { it.index == listState.firstVisibleItemIndex }
 
     fun savePosition() {
         ReaderStore.savePosition(
-            context, book.fileName,
+            context, book,
             listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset
         )
     }
@@ -563,6 +690,7 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
             failed = true
         } else {
             blocks = parsed
+            markList = ReaderStore.bookmarks(context, book.fileName)
             ReaderStore.saveLastRead(context, book)
             if (savedPos.first >= parsed.size) {
                 listState.scrollToItem(0, 0)
@@ -595,6 +723,22 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
                     TextButton(onClick = { savePosition(); onBack() }) { Text(s.back) }
                 },
                 actions = {
+                    if (headings.size >= 2) {
+                        TextButton(onClick = { showSheet = true }) { Text(s.tableOfContents) }
+                    }
+                    if (blocks != null) {
+                        TextButton(onClick = {
+                            val items = blocks!!
+                            val idx = listState.firstVisibleItemIndex
+                                .coerceIn(0, items.lastIndex)
+                            val text = when (val b = items[idx]) {
+                                is Block.Heading -> b.text
+                                is Block.Para -> b.text
+                            }
+                            ReaderStore.toggleBookmark(context, book.fileName, idx, text)
+                            markList = ReaderStore.bookmarks(context, book.fileName)
+                        }) { Text(if (currentBookmarked) "★" else "☆") }
+                    }
                     TextButton(onClick = {
                         night = !night
                         ReaderStore.saveNight(context, night)
@@ -649,6 +793,73 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Лист змісту і закладок: клік переходить до розділу або закладки.
+    if (showSheet) {
+        ModalBottomSheet(onDismissRequest = { showSheet = false }) {
+            LazyColumn(
+                Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                item {
+                    Text(
+                        s.tableOfContents,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                items(headings) { (index, heading) ->
+                    Text(
+                        heading.text,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showSheet = false
+                                scope.launch { listState.scrollToItem(index) }
+                            }
+                            .padding(
+                                start = (heading.level * 12).dp,
+                                top = 8.dp, bottom = 8.dp
+                            )
+                    )
+                }
+                item {
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Text(
+                        s.bookmarks,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                if (markList.isEmpty()) {
+                    item {
+                        Text(
+                            s.noBookmarks,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                } else {
+                    items(markList) { mark ->
+                        Text(
+                            mark.snippet.ifEmpty { "…" },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showSheet = false
+                                    scope.launch { listState.scrollToItem(mark.index) }
+                                }
+                                .padding(vertical = 8.dp)
+                        )
                     }
                 }
             }

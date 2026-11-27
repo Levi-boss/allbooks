@@ -34,6 +34,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.NetSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -53,12 +55,30 @@ fun MyBooksScreen(
     var books by remember { mutableStateOf<List<MyBook>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var toDelete by remember { mutableStateOf<MyBook?>(null) }
+    var enrichJob by remember { mutableStateOf<Job?>(null) }
 
     fun reload() {
+        enrichJob?.cancel()
         scope.launch {
             loading = true
-            books = withContext(Dispatchers.IO) { MyBooks.list(context, settings, s) }
+            val loaded = withContext(Dispatchers.IO) { MyBooks.list(context, settings, s) }
+            books = loaded
             loading = false
+            // Метадані — у фоні, по мірі готовності: список уже на екрані
+            // з іменами файлів, назви й автори підставляються потім.
+            enrichJob = scope.launch {
+                var current = loaded
+                for (book in loaded) {
+                    if (!isActive) break
+                    val meta = withContext(Dispatchers.IO) { MyBooks.loadMeta(context, book) }
+                    if (meta != null && isActive) {
+                        current = current.map {
+                            if (it.fileName == book.fileName) it.copy(meta = meta) else it
+                        }
+                        books = current
+                    }
+                }
+            }
         }
     }
 
@@ -180,11 +200,23 @@ fun MyBooksScreen(
                             .padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
                         Text(
-                            book.displayName,
+                            book.meta?.title?.takeIf { it.isNotBlank() } ?: book.displayName,
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+                        val authorLine = listOfNotNull(
+                            book.meta?.author?.takeIf { it.isNotBlank() },
+                            book.meta?.series?.takeIf { it.isNotBlank() }
+                        ).joinToString(" • ")
+                        if (authorLine.isNotBlank()) {
+                            Text(
+                                authorLine,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         val meta = MyBooks.formatSize(book.size, s)
                         val date = MyBooks.formatDate(book.modified)
                         val metaLine = listOf(meta, date).filter { it.isNotBlank() }

@@ -1,6 +1,7 @@
 package app.allbooks
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +39,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.allbooks.net.NetSettings
 import app.allbooks.net.ProxyMode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,6 +98,77 @@ fun SettingsScreen(
 
     fun save() {
         onSettingsChange(buildSettings())
+    }
+
+    // Після імпорту копії: підставити налаштування в поля екрана
+    // і зберегти звичайним шляхом (тема і перевірка підписок застосуються).
+    fun applyImported(ns: NetSettings) {
+        mode = ns.proxyMode
+        host = ns.proxyHost
+        port = if (ns.proxyPort > 0) ns.proxyPort.toString() else ""
+        user = ns.proxyUser
+        useDoh = ns.useDoh
+        notifyNewBooks = ns.notifyNewBooks
+        theme = ns.theme
+        amoled = ns.amoled
+        startCatalog = ns.startCatalog
+        folder = ns.downloadFolder
+        onSettingsChange(ns)
+    }
+
+    val scope = rememberCoroutineScope()
+
+    // Резервна копія JSON: системний вибір файлу, без хмарних SDK.
+    val exportPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    try {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            out.write(Backup.export(context).toByteArray(Charsets.UTF_8))
+                        } != null
+                    } catch (e: Exception) {
+                        AppLog.d("Backup export failed: ${e.message}")
+                        false
+                    }
+                }
+                Toast.makeText(
+                    context,
+                    if (ok) s.backupExported else s.backupFailed,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    val importPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    try {
+                        val text = context.contentResolver.openInputStream(uri)?.use {
+                            it.readBytes().toString(Charsets.UTF_8)
+                        } ?: return@withContext null
+                        val ns = Backup.importSettings(context, text)
+                        val counts = Backup.importData(context, text)
+                        ns to counts
+                    } catch (e: Exception) {
+                        AppLog.d("Backup import failed: ${e.message}")
+                        null
+                    }
+                }
+                if (result == null) {
+                    Toast.makeText(context, s.backupInvalid, Toast.LENGTH_LONG).show()
+                } else {
+                    applyImported(result.first)
+                    Toast.makeText(context, s.backupImported, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     // Тему застосовуємо одразу, як і мову, — без кнопки «Зберегти».
@@ -404,6 +480,21 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text(s.shareLogs) }
+
+            Spacer(Modifier.height(24.dp))
+            Text(s.backupTitle, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(s.backupNote, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { exportPicker.launch("bookmriya-backup.json") },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(s.backupExport) }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { importPicker.launch(arrayOf("application/json")) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(s.backupImport) }
         }
     }
 }

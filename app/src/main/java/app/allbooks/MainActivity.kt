@@ -103,6 +103,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.allbooks.net.Net
+import app.allbooks.net.ProxyMode
 import app.allbooks.opds.Author
 import app.allbooks.opds.Entry
 import app.allbooks.opds.Feed
@@ -236,24 +237,39 @@ fun CatalogScreen() {
 
     // Дозвіл на запис файлів (Android 12 і старіше; на 13+ його вже нема —
     // доступ дає вибір папки через файловий менеджер). Питаємо раз при запуску.
-    val storagePermissionLauncher = rememberLauncherForActivityResult(
+    // Сповіщення тут НЕ питаємо: їх питаємо при першій підписці або
+    // першому завантаженні (maybeAskNotifications), з поясненням.
+    var showNotifExplain by remember { mutableStateOf(false) }
+    var pendingNotifAsk by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { }
+    ) { _ ->
+        // Відповідь на сповіщення (так чи ні) — питали, більше не питаємо.
+        if (pendingNotifAsk) {
+            pendingNotifAsk = false
+            markNotifAsked(context)
+        }
+    }
+
+    // Сповіщення: питаємо один раз — при першій підписці або першому
+    // завантаженні, з коротким поясненням. Відмовився — більше не питаємо.
+    fun maybeAskNotifications() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        ) return
+        if (notifAsked(context)) return
+        showNotifExplain = true
+    }
+
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT <= 32 &&
             ContextCompat.checkSelfPermission(
                 context, Manifest.permission.WRITE_EXTERNAL_STORAGE
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-        }
-        // Сповіщення про прогрес завантаження (Android 13+ питає окремо).
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            storagePermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 
@@ -392,6 +408,7 @@ fun CatalogScreen() {
         CatalogDialog(
             s = s,
             initial = editingCatalog,
+            proxyMode = settings.proxyMode,
             onDismiss = { showAdd = false; editingCatalog = null },
             onSave = { name, url, user, pass ->
                 if (vm.saveCustomCatalog(name, url, user, pass, editingCatalog) != null) {
@@ -407,12 +424,36 @@ fun CatalogScreen() {
         AuthDialog(
             s = s,
             catalogName = currentCatalog!!.name,
-            isHttp = currentCatalog!!.urls.firstOrNull()
-                ?.startsWith("http://") == true,
+            isHttp = httpPasswordWarning(
+                currentCatalog!!.urls.firstOrNull() ?: "", settings.proxyMode
+            ),
             initialUser = authUser ?: "",
             initialPass = authPass ?: "",
             onDismiss = { vm.dismissAuth() },
             onSave = { user, pass -> vm.saveAuth(user, pass) }
+        )
+    }
+
+    // Пояснення перед системним запитом на сповіщення (перша підписка
+    // або перше завантаження). «Не треба» — більше не питаємо.
+    if (showNotifExplain) {
+        AlertDialog(
+            onDismissRequest = { showNotifExplain = false },
+            title = { Text(s.notifyAskTitle) },
+            text = { Text(s.notifyAskText) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNotifExplain = false
+                    pendingNotifAsk = true
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }) { Text(s.notifyAllow) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showNotifExplain = false
+                    markNotifAsked(context)
+                }) { Text(s.notifySkip) }
+            }
         )
     }
 
@@ -427,6 +468,7 @@ fun CatalogScreen() {
             confirmButton = {
                 TextButton(onClick = {
                     batchConfirm = null
+                    maybeAskNotifications()
                     val (user, pass) = vm.detailCreds()
                     vm.startBatchDownload(
                         candidates.take(BATCH_CAP), skipped, user, pass,
@@ -537,6 +579,7 @@ fun CatalogScreen() {
             Toast.makeText(context, s.unsubscribed, Toast.LENGTH_SHORT).show()
             return
         }
+        maybeAskNotifications()
         scope.launch {
             val baseline = try {
                 withContext(Dispatchers.IO) {
@@ -715,7 +758,10 @@ fun CatalogScreen() {
                     isSeriesSubscribed = sel.seriesLink?.let { isSubscribed(it.href) } ?: false,
                     onToggleFavourite = { vm.toggleFavourite(sel) },
                     isFavourite = favs.any { it.entry.id == sel.id },
-                    onDownload = { link -> Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri) },
+                    onDownload = { link ->
+                        maybeAskNotifications()
+                        Downloads.start(context, sel, link, s, detailUser, detailPass, settings.downloadFolder, settings, settings.safFolderUri)
+                    },
                     onRead = readBook?.let { rb -> { readingBook = rb } },
                     downloadedBooks = downloadedBooks,
                     onOpenExternal = { book -> MyBooks.open(context, book, s) },
@@ -1139,6 +1185,7 @@ private fun BookDetail(
 private fun CatalogDialog(
     s: AppStrings,
     initial: Catalog?,
+    proxyMode: ProxyMode,
     onDismiss: () -> Unit,
     onSave: (String, String, String, String) -> Unit
 ) {
@@ -1180,6 +1227,14 @@ private fun CatalogDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
                 )
+                if (pass.isNotBlank() && httpPasswordWarning(url, proxyMode)) {
+                    Text(
+                        s.authHttpWarning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
                 if (initial == null) {
                     Text(
                         s.authNote,
@@ -1245,6 +1300,51 @@ private fun AuthDialog(
         confirmButton = { TextButton(onClick = { onSave(user.trim(), pass) }) { Text(s.save) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(s.cancel) } }
     )
+}
+
+// Чи питали вже про сповіщення (один раз — і більше не питаємо).
+private const val NOTIF_PREFS = "allbooks_notif"
+private const val KEY_NOTIF_ASKED = "asked"
+
+private fun notifAsked(c: Context): Boolean =
+    c.getSharedPreferences(NOTIF_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(KEY_NOTIF_ASKED, false)
+
+private fun markNotifAsked(c: Context) {
+    c.getSharedPreferences(NOTIF_PREFS, Context.MODE_PRIVATE).edit()
+        .putBoolean(KEY_NOTIF_ASKED, true).apply()
+}
+
+// Пароль піде незашифрованим: адреса http, хост публічний, проксі
+// вимкнено. Домашні сервери (локальна мережа, .local) і Tor (.onion)
+// не чіпаємо; фільтр, що блокує локальні IP, не додаємо.
+private fun httpPasswordWarning(url: String, proxyMode: ProxyMode): Boolean {
+    if (proxyMode != ProxyMode.NONE) return false
+    val u = try {
+        java.net.URL(url)
+    } catch (e: Exception) {
+        return false
+    }
+    if (u.protocol != "http") return false
+    val host = u.host.lowercase()
+    if (host == "localhost" || host.endsWith(".local") || host.endsWith(".onion")) {
+        return false
+    }
+    if (host.contains(':')) {
+        // IPv6: приватні — loopback, link-local, unique-local.
+        return !(host == "::1" || host.startsWith("fe80:") ||
+            host.startsWith("fc") || host.startsWith("fd"))
+    }
+    val parts = host.split('.')
+    if (parts.size == 4 && parts.all { it.toIntOrNull() != null }) {
+        val a = parts[0].toInt()
+        val b = parts[1].toInt()
+        if (a == 10) return false
+        if (a == 172 && b in 16..31) return false
+        if (a == 192 && b == 168) return false
+        if (a == 127) return false
+    }
+    return true
 }
 
 /** Адреса фавіконки каталогу (для логотипа в картці); null — показати монограму. */
