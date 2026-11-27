@@ -199,45 +199,23 @@ object MyBooks {
         }
     }
 
-    /** Читалка, вибрана користувачем для «Відкрити» (запам'ятовується при першому виборі). */
+    /** Вибір читалки для «Відкрити» — у Налаштуваннях: питати щоразу
+     * або одразу у вбудованій читалці. Запам'ятовування зовнішньої
+     * читалки прибрано: «питати щоразу» має питати щоразу. */
     data class ReaderApp(val label: String, val packageName: String)
 
     private const val READER_PREFS = "allbooks_open_with"
-    private const val KEY_READER_PKG = "package"
+    private const val KEY_BUILT_IN = "built_in"
 
-    fun savedReaderPackage(context: Context): String? =
+    /** «Відкрити» — одразу у вбудованій читалці, без запиту. */
+    fun preferBuiltIn(context: Context): Boolean =
         context.getSharedPreferences(READER_PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_READER_PKG, null)?.takeIf { it.isNotBlank() }
+            .getBoolean(KEY_BUILT_IN, false)
 
-    fun saveReaderPackage(context: Context, packageName: String) {
+    fun setPreferBuiltIn(context: Context, value: Boolean) {
         context.getSharedPreferences(READER_PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_READER_PKG, packageName).apply()
+            .putBoolean(KEY_BUILT_IN, value).apply()
     }
-
-    /** Скинути запам'ятовану читалку: наступне «Відкрити» знову запитає. */
-    fun clearReaderPackage(context: Context) {
-        context.getSharedPreferences(READER_PREFS, Context.MODE_PRIVATE).edit()
-            .remove(KEY_READER_PKG).apply()
-    }
-
-    /** Назва застосунку за пакетом (null — застосунок не встановлено). */
-    fun readerAppLabel(context: Context, packageName: String): String? =
-        try {
-            val pm = context.packageManager
-            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                pm.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0))
-            } else {
-                @Suppress("DEPRECATION")
-                pm.getApplicationInfo(packageName, 0)
-            }
-            info.loadLabel(pm).toString()
-        } catch (e: Exception) {
-            null
-        }
-
-    /** Чи може застосунок з пакета ще відкрити цю книгу (не видалено). */
-    fun canOpenWith(context: Context, book: MyBook, packageName: String): Boolean =
-        readerCandidates(context, book).any { it.packageName == packageName }
 
     /** Застосунки, що вміють відкрити цю книгу (без нашого власного). */
     fun readerCandidates(context: Context, book: MyBook): List<ReaderApp> {

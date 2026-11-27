@@ -62,12 +62,14 @@ fun SettingsScreen(
     var folder by remember { mutableStateOf(settings.downloadFolder) }
     var safFolderUri by remember { mutableStateOf(settings.safFolderUri) }
     val context = LocalContext.current
-    // Запам'ятана зовнішня читалка для «Відкрити» (null — запитувати щоразу).
-    var readerLabel by remember {
-        mutableStateOf(
-            MyBooks.savedReaderPackage(context)
-                ?.let { MyBooks.readerAppLabel(context, it) }
-        )
+    // Вибір читалки для «Відкрити»: питати щоразу або вбудована.
+    var readerChoice by remember {
+        mutableStateOf(if (MyBooks.preferBuiltIn(context)) "builtin" else "ask")
+    }
+
+    fun selectReader(value: String) {
+        readerChoice = value
+        MyBooks.setPreferBuiltIn(context, value == "builtin")
     }
 
     fun buildSettings(): NetSettings = NetSettings(
@@ -361,16 +363,20 @@ fun SettingsScreen(
             Spacer(Modifier.height(24.dp))
             Text(s.externalReaderTitle, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
-            Text(
-                readerLabel ?: s.askEveryTime,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            if (readerLabel != null) {
-                Spacer(Modifier.height(8.dp))
-                TextButton(onClick = {
-                    MyBooks.clearReaderPackage(context)
-                    readerLabel = null
-                }) { Text(s.resetReaderChoice) }
+            for ((value, label) in listOf(
+                "ask" to s.askEveryTime,
+                "builtin" to s.builtInReader
+            )) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { selectReader(value) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = readerChoice == value, onClick = { selectReader(value) })
+                    Text(label, modifier = Modifier.padding(start = 8.dp))
+                }
             }
 
             Spacer(Modifier.height(24.dp))
