@@ -1444,7 +1444,7 @@ private fun FeedGrid(
         gridItems(
             feed.entries,
             key = { it.id },
-            span = { e -> if (e.isBook) GridItemSpan(1) else GridItemSpan(2) }
+            span = { GridItemSpan(1) }
         ) { e ->
             if (e.isBook) {
                 BookGridCell(
@@ -1454,11 +1454,10 @@ private fun FeedGrid(
                     onBook = { onBook(e) }
                 )
             } else {
-                EntryRow(
+                NavGridCell(
                     s = s,
                     e = e,
                     isNew = newIds.contains(e.id),
-                    onBook = { onBook(e) },
                     onOpen = onOpen
                 )
             }
@@ -1549,6 +1548,75 @@ private fun BookGridCell(
                 overflow = TextOverflow.Ellipsis
             )
         }
+        }
+    }
+}
+
+// Розділ каталогу (серія, автор, жанр) в режимі сітки — та сама картка,
+// що й у книги: перемикач ▦/☰ працює не лише з книгами.
+@Composable
+private fun NavGridCell(
+    s: AppStrings,
+    e: Entry,
+    isNew: Boolean,
+    onOpen: (String) -> Unit
+) {
+    val nav = e.navigation
+    val cover = e.links.firstOrNull {
+        it.rel.contains("thumbnail") || it.rel.contains("image")
+    }?.href
+    Card(
+        onClick = { if (nav != null) onOpen(nav.href) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        )
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    e.title.take(1).uppercase(),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                if (cover != null) {
+                    AsyncImage(
+                        model = cover,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                e.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+            if (isNew) {
+                Text(
+                    s.newBadge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
