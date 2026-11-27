@@ -64,15 +64,14 @@ fun MyBooksScreen(
 
     LaunchedEffect(Unit) { reload() }
 
-    // «Відкрити»: при першому відкритті — вибір читалки зі списку,
-    // вибір запам'ятовується і далі книга відкривається одразу в ній.
+    // «Відкрити»: за вибором у Налаштуваннях — одразу у вбудованій
+    // читалці або вибір зі списку щоразу (без запам'ятовування).
     var openPickerFor by remember { mutableStateOf<MyBook?>(null) }
     var openCandidates by remember { mutableStateOf<List<MyBooks.ReaderApp>>(emptyList()) }
 
     fun onOpen(book: MyBook) {
-        val saved = MyBooks.savedReaderPackage(context)
-        if (saved != null && MyBooks.canOpenWith(context, book, saved)) {
-            MyBooks.open(context, book, s, saved)
+        if (MyBooks.preferBuiltIn(context)) {
+            onRead(book)
             return
         }
         val candidates = MyBooks.readerCandidates(context, book)
@@ -96,7 +95,6 @@ fun MyBooksScreen(
                     openCandidates.forEach { app ->
                         TextButton(
                             onClick = {
-                                MyBooks.saveReaderPackage(context, app.packageName)
                                 openPickerFor = null
                                 MyBooks.open(context, book, s, app.packageName)
                             }
