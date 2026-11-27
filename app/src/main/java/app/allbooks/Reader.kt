@@ -560,11 +560,52 @@ object ReaderStore {
         val exists = cur.any { it.index == index }
         if (exists) cur.removeAll { it.index == index }
         else cur.add(Bookmark(index, clean))
-        val raw = cur.sortedBy { it.index }
-            .joinToString("\u0001") { "${it.index}\u001F${it.snippet}" }
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("bm_$fileName", raw).apply()
+            .putString("bm_$fileName", serializeMarks(cur)).apply()
         return !exists
+    }
+
+    private fun serializeMarks(marks: List<Bookmark>): String =
+        marks.sortedBy { it.index }
+            .joinToString("\u0001") { "${it.index}\u001F${it.snippet}" }
+
+    /** Усі позиції читання («pos_...» → «індекс:зсув») — для резервної копії. */
+    fun allPositions(c: Context): Map<String, String> {
+        val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.all.mapNotNull { (k, v) ->
+            if (k.startsWith("pos_") && v is String) k to v else null
+        }.toMap()
+    }
+
+    /** Усі закладки читалки (ім'я файлу → список) — для резервної копії. */
+    fun allBookmarks(c: Context): Map<String, List<Bookmark>> {
+        val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.all.keys.mapNotNull { k ->
+            if (!k.startsWith("bm_")) null
+            else k.removePrefix("bm_") to bookmarks(c, k.removePrefix("bm_"))
+        }.toMap()
+    }
+
+    /** Записати позиції, закладки і останню книгу з копії
+     * (імпортовані перемагають). */
+    fun importReader(
+        c: Context,
+        positions: Map<String, String>,
+        bookmarks: Map<String, List<Bookmark>>,
+        lastRead: Pair<String, String>?
+    ) {
+        val edit = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        positions.forEach { (k, v) ->
+            if (k.startsWith("pos_")) edit.putString(k, v)
+        }
+        bookmarks.forEach { (file, marks) ->
+            edit.putString("bm_$file", serializeMarks(marks))
+        }
+        if (lastRead != null) {
+            edit.putString("last_file", lastRead.first)
+            edit.putString("last_name", lastRead.second)
+        }
+        edit.apply()
     }
 
     /** Остання відкрита книга (ім'я файлу + назва) — для «Продовжити читання». */
