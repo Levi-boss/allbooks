@@ -57,7 +57,10 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipInputStream
 
 /**
@@ -167,6 +170,10 @@ object Reader {
                     }
                     if (blocks.isNullOrEmpty()) null else blocks
                 }
+            } catch (e: OutOfMemoryError) {
+                // Велика книга: показати «не вдалося прочитати» замість краху.
+                AppLog.d("Reader load OOM: ${book.fileName}")
+                null
             } catch (e: Exception) {
                 AppLog.d("Reader load failed: ${book.fileName}: ${e.message}")
                 null
@@ -318,12 +325,24 @@ object Reader {
 
     // --- EPUB: container.xml → OPF (manifest + spine) → глави XHTML. ---
 
+    // Текстові записи архіву: тільки їх читаємо в пам'ять. Картинки,
+    // шрифти, CSS і медіа пропускаємо — інакше EPUB на 30+ МБ з
+    // картинками вантажить всю пам'ять.
+    private fun isEpubTextEntry(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower.endsWith(".xml") || lower.endsWith(".opf") ||
+            lower.endsWith(".ncx") || lower.endsWith(".xhtml") ||
+            lower.endsWith(".html") || lower.endsWith(".htm")
+    }
+
     private fun parseEpub(stream: InputStream): List<Block> {
         val entries = mutableMapOf<String, ByteArray>()
         ZipInputStream(stream).use { zip ->
             var e = zip.nextEntry
             while (e != null) {
-                if (!e.isDirectory) entries[e.name] = zip.readBytes()
+                if (!e.isDirectory && isEpubTextEntry(e.name)) {
+                    entries[e.name] = zip.readBytes()
+                }
                 zip.closeEntry()
                 e = zip.nextEntry
             }
@@ -421,7 +440,10 @@ object Reader {
                         skipDepth > 0 || inHead -> {}
                         name == "br" -> out.br()
                         headingLevel(name) != null -> out.startHeading(headingLevel(name)!!)
-                        name == "p" -> out.startPara()
+                        // Блочні теги без <p> всередині (div, li, blockquote)
+                        // теж дають абзац, інакше книга виходить порожньою.
+                        name == "p" || name == "div" || name == "li" ||
+                            name == "blockquote" -> out.startPara()
                     }
                 }
                 XmlPullParser.TEXT -> if (skipDepth == 0 && !inHead) out.text(parser.text)
@@ -432,7 +454,9 @@ object Reader {
                         name == "script" || name == "style" ->
                             skipDepth = (skipDepth - 1).coerceAtLeast(0)
                         skipDepth > 0 || inHead -> {}
-                        headingLevel(name) != null || name == "p" -> out.flush()
+                        headingLevel(name) != null || name == "p" ||
+                            name == "div" || name == "li" ||
+                            name == "blockquote" -> out.flush()
                     }
                 }
             }
@@ -445,7 +469,17 @@ object Reader {
     // --- TXT: абзаци розділені порожніми рядками; перенесені рядки зливаються. ---
 
     private fun parseTxt(stream: InputStream): List<Block> {
-        val text = stream.bufferedReader(Charsets.UTF_8).readText()
+        // Спершу суворий UTF-8; якщо не декодується — windows-1251
+        // (часта для кирилиці), інакше текст нечитабельний.
+        val bytes = stream.readBytes()
+        val text = try {
+            val decoder = Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            decoder.decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (e: CharacterCodingException) {
+            String(bytes, Charset.forName("windows-1251"))
+        }
         val blocks = mutableListOf<Block>()
         val cur = StringBuilder()
         fun flush() {
