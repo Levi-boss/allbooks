@@ -98,6 +98,15 @@ fun DownloadsScreen(s: AppStrings, onBack: () -> Unit) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (item.isFailed && item.error.isNotBlank()) {
+                            Text(
+                                item.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Spacer(Modifier.height(6.dp))
                         if (item.total > 0) {
                             LinearProgressIndicator(
