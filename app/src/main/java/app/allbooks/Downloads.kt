@@ -42,7 +42,10 @@ data class DownloadItem(
     val downloaded: Long,
     val total: Long,
     val canRetry: Boolean = false,
-    val safDocUri: String = ""
+    val safDocUri: String = "",
+    // Причина останньої помилки (порожньо — без помилки); показується
+    // в списку завантажень під назвою файлу.
+    val error: String = ""
 ) {
     val progress: Float get() = if (total > 0) (downloaded.toFloat() / total).coerceIn(0f, 1f) else 0f
     val percent: Int get() = (progress * 100).toInt()
@@ -127,7 +130,8 @@ object Downloads {
     private fun saveSafItem(c: Context, item: DownloadItem) {
         val raw = listOf(
             item.title, item.fileName, item.status.toString(),
-            item.downloaded.toString(), item.total.toString(), item.safDocUri
+            item.downloaded.toString(), item.total.toString(), item.safDocUri,
+            item.error
         ).joinToString("\u0001")
         safPrefs(c).edit().putString(SAF_ITEM_PREFIX + item.id, raw).apply()
     }
@@ -144,7 +148,8 @@ object Downloads {
             downloaded = p[3].toLongOrNull() ?: 0L,
             total = p[4].toLongOrNull() ?: -1L,
             canRetry = hasMeta(c, id),
-            safDocUri = p.getOrNull(5) ?: ""
+            safDocUri = p.getOrNull(5) ?: "",
+            error = p.getOrNull(6) ?: ""
         )
     }
 
@@ -301,6 +306,21 @@ object Downloads {
             }
             .filter { it.id !in activeIds }
             .forEach { item ->
+                // Недокачаний файл не лишаємо: інакше після загибелі
+                // процесу він висить у папці як сміття і видно іншим
+                // застосункам. Файл з FileProvider (Android 9 і старіші)
+                // тут не чіпаємо — для нього логіка в remove().
+                if (item.safDocUri.isNotBlank()) {
+                    try {
+                        val uri = Uri.parse(item.safDocUri)
+                        if (uri.authority == "media") {
+                            appContext.contentResolver.delete(uri, null, null)
+                        } else if (uri.authority != "app.allbooks.fileprovider") {
+                            DocumentsContract.deleteDocument(appContext.contentResolver, uri)
+                        }
+                    } catch (ignored: Exception) {
+                    }
+                }
                 saveSafItem(appContext, item.copy(status = DownloadManager.STATUS_FAILED))
                 cancelSafNotification(appContext, item.id)
             }
@@ -368,9 +388,11 @@ object Downloads {
         val appContext = context.applicationContext
         var id = System.currentTimeMillis()
         while (readSafItem(appContext, id) != null) id++
+        // Черга: PENDING і без сповіщення, поки семафор не пустить
+        // корутину — інакше пакет з 30 книг дає 30 сповіщень одразу.
         val item = DownloadItem(
             id = id, title = title, fileName = name,
-            status = DownloadManager.STATUS_RUNNING,
+            status = DownloadManager.STATUS_PENDING,
             downloaded = 0L, total = -1L, canRetry = true
         )
         saveSafItem(appContext, item)
@@ -378,21 +400,24 @@ object Downloads {
             appContext, id,
             listOf(url, title, name, folder, user ?: "", pass ?: "", "okhttp")
         )
-        showSafNotification(appContext, s, item)
         if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+        activeIds.add(id)
         safScope.launch {
-            activeIds.add(id)
             try {
                 downloadSlots.withPermit {
+            // Семафор пустив: тепер справді RUNNING — і сповіщення.
+            saveSafItem(appContext, item.copy(status = DownloadManager.STATUS_RUNNING))
+            showSafNotification(appContext, s, item.copy(status = DownloadManager.STATUS_RUNNING))
             var downloaded = 0L
             var total = -1L
             var docUri: Uri? = null
             var targetFile: File? = null
             var lastSave = 0L
+            var errorMsg = ""
             fun saveProgress(status: Int) {
                 val cur = item.copy(
                     status = status, downloaded = downloaded, total = total,
-                    safDocUri = docUri?.toString() ?: ""
+                    safDocUri = docUri?.toString() ?: "", error = errorMsg
                 )
                 saveSafItem(appContext, cur)
                 showSafNotification(appContext, s, cur)
@@ -414,6 +439,9 @@ object Downloads {
                             put(MediaStore.Downloads.DISPLAY_NAME, name)
                             put(MediaStore.Downloads.MIME_TYPE, MyBooks.mimeFor(name))
                             put(MediaStore.Downloads.RELATIVE_PATH, "Download/$folder")
+                            // Недокачаний файл не видно іншим застосункам,
+                            // поки качається.
+                            put(MediaStore.Downloads.IS_PENDING, 1)
                         }
                         docUri = appContext.contentResolver.insert(
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
@@ -435,6 +463,11 @@ object Downloads {
                                 out.flush()
                             }
                         } ?: throw IOException("cannot open output stream")
+                        // Файл докачано — показати його іншим застосункам.
+                        val done = ContentValues().apply {
+                            put(MediaStore.Downloads.IS_PENDING, 0)
+                        }
+                        appContext.contentResolver.update(docUri!!, done, null, null)
                     } else {
                         val dir = File(
                             Environment.getExternalStoragePublicDirectory(
@@ -468,6 +501,7 @@ object Downloads {
                 saveProgress(DownloadManager.STATUS_SUCCESSFUL)
             } catch (e: Exception) {
                 AppLog.d("Download failed (okhttp): $name: ${e.message}")
+                errorMsg = e.message ?: e.javaClass.simpleName
                 if (docUri != null) {
                     try {
                         appContext.contentResolver.delete(docUri!!, null, null)
@@ -505,9 +539,11 @@ object Downloads {
         val appContext = context.applicationContext
         var id = System.currentTimeMillis()
         while (readSafItem(appContext, id) != null) id++
+        // Черга: PENDING і без сповіщення, поки семафор не пустить
+        // корутину — інакше пакет з 30 книг дає 30 сповіщень одразу.
         val item = DownloadItem(
             id = id, title = title, fileName = name,
-            status = DownloadManager.STATUS_RUNNING,
+            status = DownloadManager.STATUS_PENDING,
             downloaded = 0L, total = -1L, canRetry = true
         )
         saveSafItem(appContext, item)
@@ -515,20 +551,23 @@ object Downloads {
             appContext, id,
             listOf(url, title, name, folderUri, user ?: "", pass ?: "", "saf")
         )
-        showSafNotification(appContext, s, item)
         if (!quiet) Toast.makeText(context, "${s.downloading}: $name", Toast.LENGTH_SHORT).show()
+        activeIds.add(id)
         safScope.launch {
-            activeIds.add(id)
             try {
                 downloadSlots.withPermit {
+            // Семафор пустив: тепер справді RUNNING — і сповіщення.
+            saveSafItem(appContext, item.copy(status = DownloadManager.STATUS_RUNNING))
+            showSafNotification(appContext, s, item.copy(status = DownloadManager.STATUS_RUNNING))
             var downloaded = 0L
             var total = -1L
             var docUri: Uri? = null
             var lastSave = 0L
+            var errorMsg = ""
             fun saveProgress(status: Int) {
                 val cur = item.copy(
                     status = status, downloaded = downloaded, total = total,
-                    safDocUri = docUri?.toString() ?: ""
+                    safDocUri = docUri?.toString() ?: "", error = errorMsg
                 )
                 saveSafItem(appContext, cur)
                 showSafNotification(appContext, s, cur)
@@ -575,6 +614,7 @@ object Downloads {
                 saveProgress(DownloadManager.STATUS_SUCCESSFUL)
             } catch (e: Exception) {
                 AppLog.d("Download failed (saf): $name: ${e.message}")
+                errorMsg = e.message ?: e.javaClass.simpleName
                 if (docUri != null) {
                     try {
                         DocumentsContract.deleteDocument(appContext.contentResolver, docUri)

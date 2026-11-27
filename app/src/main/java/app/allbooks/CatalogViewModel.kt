@@ -371,7 +371,12 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
                         launch(Dispatchers.IO) {
                             val section: GlobalSection? = try {
                                 withTimeout(15_000) {
-                                    val client = Net.buildClient(settings)
+                                    // Блокуючий execute() не реагує на
+                                    // скасування корутини: жорсткий ліміт
+                                    // всього запиту — callTimeout клієнта.
+                                    val client = Net.buildClient(settings).newBuilder()
+                                        .callTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                                        .build()
                                     val (u, p) = credsFor(cat)
                                     val root = Net.fetchFirst(client, cat.urls, u, p)
                                     val rootFeed = OpdsParser.parse(
@@ -398,7 +403,9 @@ class CatalogViewModel(app: Application) : AndroidViewModel(app) {
                                 AppLog.d("Global search failed for ${cat.name}: ${e.message}")
                                 GlobalSection(cat, null, emptyList(), e.message)
                             }
-                            if (section != null) {
+                            // Скасованому пошуку запізніла секція не
+                            // потрібна: інакше вона лізе в новий стан.
+                            if (section != null && isActive) {
                                 _globalSearch.update { cur ->
                                     cur.copy(sections = cur.sections + section)
                                 }
