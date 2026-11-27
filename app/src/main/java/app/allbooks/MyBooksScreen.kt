@@ -57,6 +57,16 @@ fun MyBooksScreen(
     var toDelete by remember { mutableStateOf<MyBook?>(null) }
     var enrichJob by remember { mutableStateOf<Job?>(null) }
 
+    // Групування за серіями (3.3): серія вже є в метаданих з кроку 4.
+    // Книги однієї серії йдуть разом із заголовком (за алфавітом серій),
+    // книги без серії — в кінці списку без заголовка.
+    val grouped = remember(books) {
+        val bySeries = books.filter { !it.meta?.series.isNullOrBlank() }
+            .groupBy { it.meta?.series.orEmpty() }
+            .toSortedMap()
+        bySeries to books.filter { it.meta?.series.isNullOrBlank() }
+    }
+
     fun reload() {
         enrichJob?.cancel()
         scope.launch {
@@ -193,54 +203,80 @@ fun MyBooksScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(books, key = { it.fileName }) { book ->
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
+                val (bySeries, withoutSeries) = grouped
+                bySeries.forEach { (series, items) ->
+                    item(key = "series:$series") {
                         Text(
-                            book.meta?.title?.takeIf { it.isNotBlank() } ?: book.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
+                            series,
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                         )
-                        val authorLine = listOfNotNull(
-                            book.meta?.author?.takeIf { it.isNotBlank() },
-                            book.meta?.series?.takeIf { it.isNotBlank() }
-                        ).joinToString(" • ")
-                        if (authorLine.isNotBlank()) {
-                            Text(
-                                authorLine,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        val meta = MyBooks.formatSize(book.size, s)
-                        val date = MyBooks.formatDate(book.modified)
-                        val metaLine = listOf(meta, date).filter { it.isNotBlank() }
-                            .joinToString(" • ")
-                        if (metaLine.isNotBlank()) {
-                            Text(
-                                metaLine,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Button(onClick = { onOpen(book) }) {
-                                Text(s.open)
-                            }
-                            if (Reader.supports(book.fileName)) {
-                                TextButton(onClick = { onRead(book) }) { Text(s.read) }
-                            }
-                            TextButton(onClick = { toDelete = book }) { Text(s.delete) }
-                        }
                     }
-                    HorizontalDivider()
+                    items(items, key = { it.fileName }) { book ->
+                        BookRow(book, s, { onOpen(it) }, { onRead(it) }, { toDelete = it })
+                    }
+                }
+                items(withoutSeries, key = { it.fileName }) { book ->
+                    BookRow(book, s, { onOpen(it) }, { onRead(it) }, { toDelete = it })
                 }
             }
         }
     }
+}
+
+@Composable
+private fun BookRow(
+    book: MyBook,
+    s: AppStrings,
+    onOpen: (MyBook) -> Unit,
+    onRead: (MyBook) -> Unit,
+    onDelete: (MyBook) -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(
+            book.meta?.title?.takeIf { it.isNotBlank() } ?: book.displayName,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        val authorLine = listOfNotNull(
+            book.meta?.author?.takeIf { it.isNotBlank() },
+            book.meta?.series?.takeIf { it.isNotBlank() }
+        ).joinToString(" • ")
+        if (authorLine.isNotBlank()) {
+            Text(
+                authorLine,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        val meta = MyBooks.formatSize(book.size, s)
+        val date = MyBooks.formatDate(book.modified)
+        val metaLine = listOf(meta, date).filter { it.isNotBlank() }
+            .joinToString(" • ")
+        if (metaLine.isNotBlank()) {
+            Text(
+                metaLine,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { onOpen(book) }) {
+                Text(s.open)
+            }
+            if (Reader.supports(book.fileName)) {
+                TextButton(onClick = { onRead(book) }) { Text(s.read) }
+            }
+            TextButton(onClick = { onDelete(book) }) { Text(s.delete) }
+        }
+    }
+    HorizontalDivider()
 }
