@@ -141,6 +141,7 @@ class MainActivity : ComponentActivity() {
         // можна було повторити зі списку.
         Downloads.failStale(this)
         ThemeChoice.set(SettingsStore.load(this).theme)
+        ThemeChoice.setAmoledMode(SettingsStore.load(this).amoled)
         // Фонова перевірка підписок (раз на день), якщо сповіщення ввімкнено.
         if (SettingsStore.load(this).notifyNewBooks) {
             SubCheckScheduler.schedule(this)
@@ -148,7 +149,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val dark = themeIsDark(ThemeChoice.theme)
-            AllBooksTheme(dark = dark, dynamic = true) {
+            AllBooksTheme(dark = dark, amoled = ThemeChoice.amoled, dynamic = true) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CatalogScreen()
                 }
@@ -161,9 +162,15 @@ class MainActivity : ComponentActivity() {
 object ThemeChoice {
     var theme by mutableStateOf("system")
         private set
+    var amoled by mutableStateOf(false)
+        private set
 
     fun set(t: String) {
         theme = t
+    }
+
+    fun setAmoledMode(v: Boolean) {
+        amoled = v
     }
 }
 
@@ -264,6 +271,10 @@ fun CatalogScreen() {
 
     LaunchedEffect(settings.theme) {
         ThemeChoice.set(settings.theme)
+    }
+
+    LaunchedEffect(settings.amoled) {
+        ThemeChoice.setAmoledMode(settings.amoled)
     }
 
     // Нова стрічка — ховаємо поле пошуку в ній (як було при зміні current).

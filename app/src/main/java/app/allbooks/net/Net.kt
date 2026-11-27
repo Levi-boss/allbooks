@@ -36,7 +36,9 @@ data class NetSettings(
     /** Сповіщати про нові книги в підписках (перевірка раз на день). */
     val notifyNewBooks: Boolean = true,
     /** Стрічки каталогів — сіткою обкладинок замість списку. */
-    val feedGrid: Boolean = false
+    val feedGrid: Boolean = false,
+    /** Чисто чорний фон у темній темі (AMOLED). */
+    val amoled: Boolean = false
 )
 
 class FetchResult(val url: String, val bytes: ByteArray)
@@ -120,7 +122,10 @@ object Net {
             }
         }
 
-        if (s.useDoh) {
+        // DoH ігнорується при SOCKS5: інакше OkHttp резолвить домен
+        // локально через Cloudflare до передачі в проксі — це ламає
+        // .onion (Tor/Orbot) і розкриває DNS-запити.
+        if (s.useDoh && s.proxyMode != ProxyMode.SOCKS5) {
             val bootstrap = builder.build()
             val doh = DnsOverHttps.Builder()
                 .client(bootstrap)
