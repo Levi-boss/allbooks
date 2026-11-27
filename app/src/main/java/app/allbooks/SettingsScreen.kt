@@ -57,6 +57,7 @@ fun SettingsScreen(
     var useDoh by remember { mutableStateOf(settings.useDoh) }
     var notifyNewBooks by remember { mutableStateOf(settings.notifyNewBooks) }
     var theme by remember { mutableStateOf(settings.theme) }
+    var amoled by remember { mutableStateOf(settings.amoled) }
     var startCatalog by remember { mutableStateOf(settings.startCatalog) }
     var folder by remember { mutableStateOf(settings.downloadFolder) }
     var safFolderUri by remember { mutableStateOf(settings.safFolderUri) }
@@ -81,7 +82,11 @@ fun SettingsScreen(
         folderChosen = true,
         safFolderUri = safFolderUri,
         theme = theme,
-        notifyNewBooks = notifyNewBooks
+        notifyNewBooks = notifyNewBooks,
+        // Сітка/список не має свого стану на цьому екрані — беремо
+        // збережене значення, інакше будь-яке збереження скидає сітку.
+        feedGrid = settings.feedGrid,
+        amoled = amoled
     )
 
     fun save() {
@@ -180,6 +185,29 @@ fun SettingsScreen(
                     RadioButton(selected = theme == value, onClick = { selectTheme(value) })
                     Text(label, modifier = Modifier.padding(start = 8.dp))
                 }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.amoledTitle, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        s.amoledDesc,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Switch(
+                    checked = amoled,
+                    // У світлій темі чорний фон не діє — перемикач неактивний.
+                    enabled = theme != "light",
+                    onCheckedChange = {
+                        amoled = it
+                        onSettingsChange(buildSettings().copy(amoled = it))
+                    }
+                )
             }
 
             Spacer(Modifier.height(24.dp))
@@ -306,6 +334,13 @@ fun SettingsScreen(
                     )
                 }
                 Switch(checked = useDoh, onCheckedChange = { useDoh = it })
+            }
+            if (mode == ProxyMode.SOCKS5) {
+                Text(
+                    s.dohSocksNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
             }
 
             Spacer(Modifier.height(16.dp))
