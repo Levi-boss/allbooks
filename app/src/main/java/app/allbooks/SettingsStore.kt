@@ -31,7 +31,8 @@ object SettingsStore {
             safFolderUri = p.getString("saf_folder_uri", "") ?: "",
             theme = p.getString("theme", "system") ?: "system",
             notifyNewBooks = p.getBoolean("notify_new_books", true),
-            feedGrid = p.getBoolean("feed_grid", false)
+            feedGrid = p.getBoolean("feed_grid", false),
+            amoled = p.getBoolean("amoled", false)
         )
     }
 
@@ -50,6 +51,7 @@ object SettingsStore {
             .putString("theme", s.theme)
             .putBoolean("notify_new_books", s.notifyNewBooks)
             .putBoolean("feed_grid", s.feedGrid)
+            .putBoolean("amoled", s.amoled)
             .apply()
     }
 }
