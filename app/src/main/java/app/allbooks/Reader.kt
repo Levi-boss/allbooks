@@ -59,6 +59,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
@@ -93,6 +94,19 @@ data class ReaderBook(
 sealed interface Block {
     data class Heading(val text: String, val level: Int) : Block
     data class Para(val text: String) : Block
+}
+
+/** Читання потоку з лімітом (захист від zip-бомб): null, якщо більше ліміту. */
+internal fun InputStream.readBounded(limit: Int): ByteArray? {
+    val out = ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    while (true) {
+        val n = read(buf)
+        if (n < 0) break
+        if (out.size() + n > limit) return null
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
 }
 
 object Reader {
@@ -271,7 +285,8 @@ object Reader {
     // заголовки — з <title>, абзаци — з <p> і <v> (вірші). ---
 
     private fun parseFb2(stream: InputStream): List<Block> {
-        val parser = newParser(cleanXml(stream.readBytes()))
+        val bytes = stream.readBounded(48 * 1024 * 1024) ?: return emptyList()
+        val parser = newParser(cleanXml(bytes))
         val out = BlockCollector()
         var event = parser.eventType
         var bodySeen = 0
@@ -346,7 +361,7 @@ object Reader {
             var e = zip.nextEntry
             while (e != null) {
                 if (!e.isDirectory && isEpubTextEntry(e.name)) {
-                    entries[e.name] = zip.readBytes()
+                    entries[e.name] = zip.readBounded(16 * 1024 * 1024) ?: return emptyList()
                 }
                 zip.closeEntry()
                 e = zip.nextEntry
@@ -366,7 +381,9 @@ object Reader {
                 href.endsWith(".htm", ignoreCase = true) ||
                 href.endsWith(".html", ignoreCase = true)
             if (!isXhtml) continue
-            val bytes = entries[resolvePath(opfDir, href)] ?: continue
+            val bytes = entries[resolvePath(opfDir, href)]
+                ?: entries[resolvePath(opfDir, Uri.decode(href))]
+                ?: continue
             blocks.addAll(parseXhtml(bytes))
         }
         return blocks
@@ -476,7 +493,7 @@ object Reader {
     private fun parseTxt(stream: InputStream): List<Block> {
         // Спершу суворий UTF-8; якщо не декодується — windows-1251
         // (часта для кирилиці), інакше текст нечитабельний.
-        val bytes = stream.readBytes()
+        val bytes = stream.readBounded(48 * 1024 * 1024) ?: return emptyList()
         val text = try {
             val decoder = Charsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
@@ -541,27 +558,48 @@ object ReaderStore {
     /** Закладка читалки: індекс блока + короткий уривок його тексту. */
     data class Bookmark(val index: Int, val snippet: String)
 
-    // Закладки книги: "bm_<ім'я файлу>" = записи "індекс\u001Fуривок",
-    // розділені \u0001. Уривок — перші 60 символів, без службових знаків.
-    fun bookmarks(c: Context, fileName: String): List<Bookmark> {
+    // Ключ закладок: ім'я файлу + розмір, якщо відомий, — як у позицій.
+    // Дві різні книги з однаковим іменем більше не ділять закладки.
+    private fun bmKey(book: ReaderBook): String {
+        val size = book.file?.takeIf { it.exists() }?.length()?.takeIf { it > 0 }
+        return "bm_" + book.fileName + (size?.let { "_$it" } ?: "")
+    }
+
+    private fun readMarks(c: Context, key: String): List<Bookmark> {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString("bm_$fileName", null) ?: return emptyList()
-        return raw.split('\u0001').mapNotNull { entry ->
-            val parts = entry.split('\u001F')
+            .getString(key, null) ?: return emptyList()
+        return raw.split('').mapNotNull { entry ->
+            val parts = entry.split('')
             val index = parts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
             Bookmark(index, parts.getOrNull(1) ?: "")
         }.sortedBy { it.index }
     }
 
+    // Закладки книги = записи "індексуривок", розділені .
+    // Уривок — перші 60 символів, без службових знаків. Старі закладки
+    // за ключем без розміру переносяться на новий ключ при першому читанні.
+    fun bookmarks(c: Context, book: ReaderBook): List<Bookmark> {
+        val key = bmKey(book)
+        val marks = readMarks(c, key)
+        if (marks.isNotEmpty()) return marks
+        val oldKey = "bm_" + book.fileName
+        if (oldKey == key) return emptyList()
+        val old = readMarks(c, oldKey)
+        if (old.isEmpty()) return emptyList()
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(key, serializeMarks(old)).remove(oldKey).apply()
+        return old
+    }
+
     /** Додати/прибрати закладку на блок; повертає true, якщо тепер є. */
-    fun toggleBookmark(c: Context, fileName: String, index: Int, snippet: String): Boolean {
-        val clean = snippet.replace(Regex("[\u0001\u001F\\n\\r]+"), " ").trim().take(60)
-        val cur = bookmarks(c, fileName).toMutableList()
+    fun toggleBookmark(c: Context, book: ReaderBook, index: Int, snippet: String): Boolean {
+        val clean = snippet.replace(Regex("[\n\r]+"), " ").trim().take(60)
+        val cur = bookmarks(c, book).toMutableList()
         val exists = cur.any { it.index == index }
         if (exists) cur.removeAll { it.index == index }
         else cur.add(Bookmark(index, clean))
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("bm_$fileName", serializeMarks(cur)).apply()
+            .putString(bmKey(book), serializeMarks(cur)).apply()
         return !exists
     }
 
@@ -582,7 +620,7 @@ object ReaderStore {
         val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return prefs.all.keys.mapNotNull { k ->
             if (!k.startsWith("bm_")) null
-            else k.removePrefix("bm_") to bookmarks(c, k.removePrefix("bm_"))
+            else k.removePrefix("bm_") to readMarks(c, k)
         }.toMap()
     }
 
@@ -690,7 +728,7 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
             failed = true
         } else {
             blocks = parsed
-            markList = ReaderStore.bookmarks(context, book.fileName)
+            markList = ReaderStore.bookmarks(context, book)
             ReaderStore.saveLastRead(context, book)
             if (savedPos.first >= parsed.size) {
                 listState.scrollToItem(0, 0)
@@ -735,8 +773,8 @@ fun ReaderScreen(s: AppStrings, book: ReaderBook, dark: Boolean, onBack: () -> U
                                 is Block.Heading -> b.text
                                 is Block.Para -> b.text
                             }
-                            ReaderStore.toggleBookmark(context, book.fileName, idx, text)
-                            markList = ReaderStore.bookmarks(context, book.fileName)
+                            ReaderStore.toggleBookmark(context, book, idx, text)
+                            markList = ReaderStore.bookmarks(context, book)
                         }) { Text(if (currentBookmarked) "★" else "☆") }
                     }
                     TextButton(onClick = {

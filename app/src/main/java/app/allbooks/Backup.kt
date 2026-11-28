@@ -133,26 +133,17 @@ object Backup {
         return root
     }
 
-    /** Налаштування з копії поверх поточних. Пароль проксі, SAF-папка
-     * і прапор вибору папки — пристроєві, лишаються як є. Не зберігає:
-     * збереження — справа викликача (щоб застосувалися тема і перевірка
-     * підписок через звичайний шлях Налаштувань). */
+    /** Налаштування з копії поверх поточних. Проксі (режим, хост, порт,
+     * логін), пароль проксі, SAF-папка і прапор вибору папки — пристроєві,
+     * лишаються як є: підмінена копія не повинна тихо міняти проксі.
+     * Не зберігає: збереження — справа викликача (щоб застосувалися тема
+     * і перевірка підписок через звичайний шлях Налаштувань). */
     fun importSettings(c: Context, json: String) = importSettings(c, parseRoot(json))
 
     private fun importSettings(c: Context, root: JSONObject) =
         SettingsStore.load(c).let { cur ->
             val o = root.optJSONObject("settings") ?: return@let cur
             cur.copy(
-                proxyMode = o.optString("proxy_mode", cur.proxyMode.name).let {
-                    try {
-                        ProxyMode.valueOf(it)
-                    } catch (e: Exception) {
-                        cur.proxyMode
-                    }
-                },
-                proxyHost = o.optString("proxy_host", cur.proxyHost),
-                proxyPort = o.optInt("proxy_port", cur.proxyPort),
-                proxyUser = o.optString("proxy_user", cur.proxyUser),
                 useDoh = o.optBoolean("use_doh", cur.useDoh),
                 startCatalog = o.optString("start_catalog", cur.startCatalog),
                 downloadFolder = o.optString("download_folder", cur.downloadFolder),

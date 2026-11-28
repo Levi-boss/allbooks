@@ -145,7 +145,9 @@ object MyBooks {
             )
             seen.add(item.fileName)
         }
-        return out.sortedByDescending { it.sortKey }
+        val sorted = out.sortedByDescending { it.sortKey }
+        pruneMetaCache(context, sorted.map { it.fileName }.toSet())
+        return sorted
     }
 
     private fun listSaf(context: Context, treeUriString: String): List<MyBook> {
@@ -219,6 +221,16 @@ object MyBooks {
             .putString(metaKey(book), clean.joinToString("\u0001")).apply()
     }
 
+    /** Чистка кешу метаданих: записи видалених книг лишаються назавжди. */
+    private fun pruneMetaCache(context: Context, alive: Set<String>) {
+        val prefs = context.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE)
+        val dead = prefs.all.keys.filter { it.substringBefore('|') !in alive }
+        if (dead.isEmpty()) return
+        val edit = prefs.edit()
+        dead.forEach { edit.remove(it) }
+        edit.apply()
+    }
+
     /** Метадані книги: з кешу або розбір файлу. Тільки FB2 і EPUB;
      * решта форматів метаданих не несуть. Викликати поза головним потоком. */
     fun loadMeta(context: Context, book: MyBook): BookMeta? {
@@ -247,14 +259,14 @@ object MyBooks {
     }
 
     // Початок XML: кодування з декларації, без DOCTYPE, HTML-сутності —
-    // як у читалки, щоб парсер не падав на них.
+    // як у читалки, щоб парсер не падав на них. Стандартні сутності XML
+    // (&amp; &lt; &gt; &quot; &apos;) тут НЕ чіпаємо: парсер їх і так
+    // розуміє, а заміна до розбору ламає назви з «&».
     private val META_ENTITIES = listOf(
         "&nbsp;" to "\u00A0",
         "&mdash;" to "—", "&ndash;" to "–",
         "&laquo;" to "«", "&raquo;" to "»",
-        "&hellip;" to "…",
-        "&amp;" to "&", "&lt;" to "<", "&gt;" to ">",
-        "&quot;" to "\"", "&apos;" to "'"
+        "&hellip;" to "…"
     )
 
     private fun decodeXmlHead(bytes: ByteArray): String {
@@ -302,6 +314,7 @@ object MyBooks {
         var seriesNum = ""
         var inTitleInfo = false
         var inAuthor = false
+        var authorDone = false
         var capture: String? = null
         val buf = StringBuilder()
         try {
@@ -315,8 +328,8 @@ object MyBooks {
                             !inTitleInfo -> {}
                             name == "author" -> inAuthor = true
                             name == "book-title" -> { capture = "title"; buf.clear() }
-                            name == "first-name" && inAuthor -> { capture = "first"; buf.clear() }
-                            name == "last-name" && inAuthor -> { capture = "last"; buf.clear() }
+                            name == "first-name" && inAuthor && !authorDone -> { capture = "first"; buf.clear() }
+                            name == "last-name" && inAuthor && !authorDone -> { capture = "last"; buf.clear() }
                             name == "sequence" -> {
                                 series = parser.getAttributeValue(null, "name") ?: ""
                                 seriesNum = parser.getAttributeValue(null, "number") ?: ""
@@ -328,7 +341,7 @@ object MyBooks {
                         val name = parser.name.lowercase()
                         when (name) {
                             "title-info" -> break
-                            "author" -> inAuthor = false
+                            "author" -> { inAuthor = false; authorDone = true }
                             "book-title" -> { title = buf.toString().trim(); capture = null }
                             "first-name" -> { authorFirst = buf.toString().trim(); capture = null }
                             "last-name" -> { authorLast = buf.toString().trim(); capture = null }
@@ -374,9 +387,9 @@ object MyBooks {
             while (e != null) {
                 val lower = e.name.lowercase()
                 if (!e.isDirectory && lower == "meta-inf/container.xml") {
-                    container = zip.readBytes()
+                    container = zip.readBounded(4 * 1024 * 1024) ?: return null
                 } else if (!e.isDirectory && lower.endsWith(".opf")) {
-                    opfs[lower] = zip.readBytes()
+                    opfs[lower] = zip.readBounded(4 * 1024 * 1024) ?: return null
                 }
                 zip.closeEntry()
                 e = zip.nextEntry
