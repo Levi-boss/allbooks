@@ -143,6 +143,9 @@ class MainActivity : ComponentActivity() {
         // Завислі ручні завантаження (процес загинув) — у FAILED, щоб їх
         // можна було повторити зі списку.
         Downloads.failStale(this)
+        // Одноразова міграція старих prefs завантажень у Room
+        // (інфраструктура; екран поки читає prefs).
+        Downloads.migrateToRoomIfNeeded(this)
         ThemeChoice.set(SettingsStore.load(this).theme)
         ThemeChoice.setAmoledMode(SettingsStore.load(this).amoled)
         // Фонова перевірка підписок (раз на день), якщо сповіщення ввімкнено.
