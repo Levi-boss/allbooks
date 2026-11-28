@@ -16,7 +16,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.1.0"
+        versionName = "0.2.0"
     }
 
     signingConfigs {
@@ -35,7 +35,15 @@ android {
             signingConfigs.findByName("shared")?.let { signingConfig = it }
         }
         release {
-            isMinifyEnabled = false
+            // Той самий ключ, що й у debug (shared); без секретів у CI
+            // реліз просто лишається непідписаним.
+            signingConfigs.findByName("shared")?.let { signingConfig = it }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 
