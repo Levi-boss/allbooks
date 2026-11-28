@@ -146,7 +146,9 @@ object Backup {
             cur.copy(
                 useDoh = o.optBoolean("use_doh", cur.useDoh),
                 startCatalog = o.optString("start_catalog", cur.startCatalog),
-                downloadFolder = o.optString("download_folder", cur.downloadFolder),
+                downloadFolder = Downloads.cleanFolderName(
+                    o.optString("download_folder", cur.downloadFolder)
+                ),
                 theme = o.optString("theme", cur.theme),
                 notifyNewBooks = o.optBoolean("notify_new_books", cur.notifyNewBooks),
                 feedGrid = o.optBoolean("feed_grid", cur.feedGrid),

@@ -82,11 +82,12 @@ data class ReaderBook(
     val fileName: String,
     val file: File? = null,
     val safUri: Uri? = null,
-    val dmId: Long? = null
+    val dmId: Long? = null,
+    val size: Long = 0L
 ) {
     companion object {
         fun fromMyBook(b: MyBook): ReaderBook =
-            ReaderBook(b.displayName, b.fileName, b.file, b.safUri, b.dmId)
+            ReaderBook(b.displayName, b.fileName, b.file, b.safUri, b.dmId, b.size)
     }
 }
 
@@ -535,15 +536,27 @@ object ReaderStore {
     }
 
     // Ключ позиції: ім'я файлу + розмір, якщо відомий. Дві різні книги
-    // з однаковим іменем більше не ділять одну позицію.
+    // з однаковим іменем більше не ділять одну позицію. Розмір береться
+    // з книги (SAF і DownloadManager файлу не мають), файл — запасний шлях.
     private fun posKey(book: ReaderBook): String {
-        val size = book.file?.takeIf { it.exists() }?.length()?.takeIf { it > 0 }
+        val size = book.size.takeIf { it > 0 }
+            ?: book.file?.takeIf { it.exists() }?.length()?.takeIf { it > 0 }
         return "pos_" + book.fileName + (size?.let { "_$it" } ?: "")
     }
 
     fun position(c: Context, book: ReaderBook): Pair<Int, Int> {
-        val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(posKey(book), null) ?: return 0 to 0
+        val prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val key = posKey(book)
+        var raw = prefs.getString(key, null)
+        if (raw == null) {
+            // Старий ключ без розміру (SAF/DM книги до цього виправлення).
+            val oldKey = "pos_" + book.fileName
+            raw = prefs.getString(oldKey, null)
+            if (raw != null && oldKey != key) {
+                prefs.edit().putString(key, raw).remove(oldKey).apply()
+            }
+        }
+        if (raw == null) return 0 to 0
         val parts = raw.split(':')
         val index = parts.getOrNull(0)?.toIntOrNull() ?: 0
         val offset = parts.getOrNull(1)?.toIntOrNull() ?: 0
@@ -561,21 +574,22 @@ object ReaderStore {
     // Ключ закладок: ім'я файлу + розмір, якщо відомий, — як у позицій.
     // Дві різні книги з однаковим іменем більше не ділять закладки.
     private fun bmKey(book: ReaderBook): String {
-        val size = book.file?.takeIf { it.exists() }?.length()?.takeIf { it > 0 }
+        val size = book.size.takeIf { it > 0 }
+            ?: book.file?.takeIf { it.exists() }?.length()?.takeIf { it > 0 }
         return "bm_" + book.fileName + (size?.let { "_$it" } ?: "")
     }
 
     private fun readMarks(c: Context, key: String): List<Bookmark> {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(key, null) ?: return emptyList()
-        return raw.split('').mapNotNull { entry ->
-            val parts = entry.split('')
+        return raw.split('\u0001').mapNotNull { entry ->
+            val parts = entry.split('\u001F')
             val index = parts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
             Bookmark(index, parts.getOrNull(1) ?: "")
         }.sortedBy { it.index }
     }
 
-    // Закладки книги = записи "індексуривок", розділені .
+    // Закладки книги = записи "індекс\u001Fуривок", розділені \u0001.
     // Уривок — перші 60 символів, без службових знаків. Старі закладки
     // за ключем без розміру переносяться на новий ключ при першому читанні.
     fun bookmarks(c: Context, book: ReaderBook): List<Bookmark> {
@@ -593,7 +607,7 @@ object ReaderStore {
 
     /** Додати/прибрати закладку на блок; повертає true, якщо тепер є. */
     fun toggleBookmark(c: Context, book: ReaderBook, index: Int, snippet: String): Boolean {
-        val clean = snippet.replace(Regex("[\n\r]+"), " ").trim().take(60)
+        val clean = snippet.replace(Regex("[\u0001\u001F\n\r]+"), " ").trim().take(60)
         val cur = bookmarks(c, book).toMutableList()
         val exists = cur.any { it.index == index }
         if (exists) cur.removeAll { it.index == index }

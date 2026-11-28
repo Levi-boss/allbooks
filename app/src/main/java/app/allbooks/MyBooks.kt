@@ -146,7 +146,9 @@ object MyBooks {
             seen.add(item.fileName)
         }
         val sorted = out.sortedByDescending { it.sortKey }
-        pruneMetaCache(context, sorted.map { it.fileName }.toSet())
+        // Порожній або неповний список (наприклад, втрачено дозвіл
+        // на SAF-папку) не чистить кеш — інакше книги розбираються заново.
+        if (sorted.isNotEmpty()) pruneMetaCache(context, sorted.map { it.fileName }.toSet())
         return sorted
     }
 
