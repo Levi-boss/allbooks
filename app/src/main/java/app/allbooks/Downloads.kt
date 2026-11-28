@@ -111,10 +111,14 @@ object Downloads {
     private fun hasMeta(c: Context, id: Long): Boolean =
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains(META_PREFIX + id)
 
-    private fun readMeta(c: Context, id: Long): List<String>? {
+    private fun readMetaRaw(c: Context, id: Long): List<String>? {
         val raw = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(META_PREFIX + id, null) ?: return null
-        val parts = raw.split('\u0001').toMutableList()
+        return raw.split('\u0001')
+    }
+
+    private fun readMeta(c: Context, id: Long): List<String>? {
+        val parts = readMetaRaw(c, id)?.toMutableList() ?: return null
         if (parts.size > 5) parts[5] = SecretBox.decrypt(parts[5])
         return parts
     }
@@ -324,6 +328,61 @@ object Downloads {
                 saveSafItem(appContext, item.copy(status = DownloadManager.STATUS_FAILED))
                 cancelSafNotification(appContext, item.id)
             }
+    }
+
+    /** Одноразова міграція старих prefs у Room (перший PR Room:
+     *  тільки інфраструктура). Екран «Завантаження» поки читає старе
+     *  сховище — Room ніде не читається. Пароль копіюється зашифрованим
+     *  (SecretBox), без розшифровки. Викликається при запуску застосунку,
+     *  одразу після failStale, щоб завислі записи вже мали статус FAILED.
+     *  Помилка міграції не повинна валити застосунок. */
+    fun migrateToRoomIfNeeded(context: Context) {
+        val appContext = context.applicationContext
+        safScope.launch {
+            try {
+                val db = AppDatabase.get(appContext)
+                if (db.downloadDao().count() > 0) return@launch
+                val rows = mutableListOf<DownloadEntity>()
+                // DM-задачі: тільки метадані для повтору; живий статус
+                // і прогрес далі беруться з DownloadManager.
+                for (id in trackedIds(appContext)) {
+                    val meta = readMetaRaw(appContext, id) ?: continue
+                    rows += DownloadEntity(
+                        id = id,
+                        title = meta.getOrNull(1) ?: "",
+                        fileName = meta.getOrNull(2) ?: "",
+                        url = meta.getOrNull(0) ?: "",
+                        folder = meta.getOrNull(3) ?: "",
+                        user = meta.getOrNull(4) ?: "",
+                        passEncrypted = meta.getOrNull(5) ?: "",
+                        kind = meta.getOrNull(6) ?: "dm"
+                    )
+                }
+                // Ручні завантаження: стан + метадані, якщо є.
+                for (item in listSafItems(appContext)) {
+                    val meta = readMetaRaw(appContext, item.id)
+                    rows += DownloadEntity(
+                        id = item.id,
+                        title = item.title,
+                        fileName = item.fileName,
+                        status = item.status,
+                        downloaded = item.downloaded,
+                        total = item.total,
+                        safDocUri = item.safDocUri,
+                        error = item.error,
+                        url = meta?.getOrNull(0) ?: "",
+                        folder = meta?.getOrNull(3) ?: "",
+                        user = meta?.getOrNull(4) ?: "",
+                        passEncrypted = meta?.getOrNull(5) ?: "",
+                        kind = meta?.getOrNull(6) ?: "saf"
+                    )
+                }
+                if (rows.isNotEmpty()) db.downloadDao().insertAll(rows)
+                AppLog.d("Room migration: ${rows.size} rows")
+            } catch (e: Exception) {
+                AppLog.d("Room migration failed: ${e.message}")
+            }
+        }
     }
 
     /** Ім'я папки завантажень без шляхів і службових знаків:
