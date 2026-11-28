@@ -326,11 +326,16 @@ object Downloads {
             }
     }
 
+    /** Ім'я папки завантажень без шляхів і службових знаків:
+     * слеш, зворотний слеш і «..» не пускаються назовні папки Завантаження. */
+    fun cleanFolderName(folder: String): String = folder
+        .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
+        .replace("..", " ")
+        .trim()
+        .ifEmpty { "BookMriya" }
+
     private fun enqueue(context: Context, url: String, title: String, name: String, folder: String, user: String?, pass: String?, s: AppStrings, settings: NetSettings = NetSettings(), quiet: Boolean = false): Boolean {
-        val cleanFolder = folder
-            .replace(Regex("[\\\\/:*?\"<>|\\n\\r]+"), " ")
-            .trim()
-            .ifEmpty { "BookMriya" }
+        val cleanFolder = cleanFolderName(folder)
         // Системний DownloadManager не знає про проксі та DoH застосунку:
         // з ними качаємо самі через OkHttp і пишемо в загальну папку Завантаження.
         if (settings.proxyMode != ProxyMode.NONE || settings.useDoh) {
