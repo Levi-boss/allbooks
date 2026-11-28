@@ -53,14 +53,29 @@ jobs:
             exit 1
           }
 
+      - name: Build release APK
+        run: |
+          set -o pipefail
+          gradle assembleRelease --stacktrace 2>&1 | tee build-release.log || {
+            grep -A8 "What went wrong" build-release.log | head -14 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
+
       - name: Verify signature
         run: |
           AS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
-          OUT=$("$AS" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
-          echo "$OUT"
-          echo "$OUT" | grep -q "fd849d9ddaafc62d989dd63d286504e93acbe69b3558b4af4b7d7fe7985757be" || { echo "::error::НЕПРАВИЛЬНИЙ КЛЮЧ ПІДПИСУ"; exit 1; }
+          for APK in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release.apk; do
+            OUT=$("$AS" verify --print-certs "$APK")
+            echo "$OUT"
+            echo "$OUT" | grep -q "fd849d9ddaafc62d989dd63d286504e93acbe69b3558b4af4b7d7fe7985757be" || { echo "::error::НЕПРАВИЛЬНИЙ КЛЮЧ ПІДПИСУ: $APK"; exit 1; }
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: AllBooks-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AllBooks-release
+          path: app/build/outputs/apk/release/app-release.apk
